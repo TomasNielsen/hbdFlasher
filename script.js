@@ -161,20 +161,35 @@ class ESP32BootloaderController {
     async disconnect() {
         this.stopKeepAlive();
         
-        if (this.reader) {
-            await this.reader.cancel();
-            this.reader.releaseLock();
+        try {
+            if (this.reader) {
+                await this.reader.cancel();
+                this.reader.releaseLock();
+                this.reader = null;
+            }
+        } catch (error) {
+            console.warn('Reader cleanup warning:', error);
         }
         
-        if (this.writer) {
-            this.writer.releaseLock();
+        try {
+            if (this.writer) {
+                this.writer.releaseLock();
+                this.writer = null;
+            }
+        } catch (error) {
+            console.warn('Writer cleanup warning:', error);
         }
         
-        if (this.port) {
-            await this.port.close();
+        try {
+            if (this.port && this.port.readable) {
+                await this.port.close();
+                this.port = null;
+            }
+        } catch (error) {
+            console.warn('Port close warning:', error);
         }
         
-        console.log('Disconnected from ESP32 bootloader');
+        console.log('Disconnected from ESP32 bootloader - port released for ESP Web Tools');
     }
 
     delay(ms) {
@@ -420,11 +435,24 @@ class ESP32Flasher {
         }
     }
 
-    proceedToFlashing() {
+    async proceedToFlashing() {
         // Update summary with selected version
         const versionInfo = this.versions.versions.find(v => v.version === this.selectedVersion);
         if (versionInfo) {
             document.getElementById('selected-version').textContent = versionInfo.name;
+        }
+        
+        // Important: Release the bootloader controller port so ESP Web Tools can use it
+        if (this.bootloaderController && this.bootloaderController.isInBootloaderMode) {
+            console.log('🔄 Releasing port from bootloader controller for ESP Web Tools...');
+            
+            // Stop keep-alive but keep device in prepared state
+            this.bootloaderController.stopKeepAlive();
+            
+            // Close our connection so ESP Web Tools can open it
+            await this.bootloaderController.disconnect();
+            
+            console.log('✅ Port released - ESP Web Tools can now take over');
         }
         
         // Advance to step 3
