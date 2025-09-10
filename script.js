@@ -296,13 +296,9 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Override with our port and prepare bootloader
-            navigator.serial.requestPort = async () => {
+            // Override with our port
+            navigator.serial.requestPort = () => {
                 console.log('🔄 Using existing port instead of showing port selection dialog');
-                
-                // Force ESP32 into bootloader mode before returning port
-                await this.prepareESP32Bootloader();
-                
                 return Promise.resolve(this.connectedPort);
             };
             
@@ -311,42 +307,6 @@ class ESP32Flasher {
         }
     }
 
-    // Force ESP32 into bootloader mode and keep it there
-    async prepareESP32Bootloader() {
-        if (!this.connectedPort) return;
-
-        try {
-            console.log('🔄 Preparing ESP32 for bootloader mode...');
-            
-            // Open the port if not already open
-            if (!this.connectedPort.readable) {
-                await this.connectedPort.open({
-                    baudRate: 115200,
-                    dataBits: 8,
-                    stopBits: 1,
-                    parity: 'none',
-                    flowControl: 'none'
-                });
-            }
-
-            // Get reader and writer
-            const reader = this.connectedPort.readable.getReader();
-            const writer = this.connectedPort.writable.getWriter();
-
-            // Send break condition to enter bootloader
-            await writer.write(new Uint8Array([0x00])); // Send break/null byte
-            await this.delay(100);
-            
-            console.log('✅ ESP32 should now be in bootloader mode');
-            
-            // Clean up
-            reader.releaseLock();
-            writer.releaseLock();
-            
-        } catch (error) {
-            console.warn('⚠️ Bootloader preparation failed (ESP Web Tools will handle):', error);
-        }
-    }
 
     // Handle quick flash with automated dialog clicking
     async handleQuickFlash() {
@@ -358,9 +318,6 @@ class ESP32Flasher {
         try {
             console.log('⚡ Starting Quick Flash with automated dialog handling...');
             
-            // First prepare ESP32 for bootloader mode
-            await this.prepareESP32Bootloader();
-            
             // Click the ESP Web Tools button to start the process
             const installButton = document.querySelector('esp-web-install-button');
             const activateButton = installButton.querySelector('button[slot="activate"]');
@@ -369,8 +326,10 @@ class ESP32Flasher {
                 console.log('🔄 Clicking ESP Web Tools button...');
                 activateButton.click();
                 
-                // Set up automated dialog clicking
-                this.setupAutomatedDialogClicker();
+                // Set up automated dialog clicking after a small delay
+                setTimeout(() => {
+                    this.setupAutomatedDialogClicker();
+                }, 200);
             }
             
         } catch (error) {
