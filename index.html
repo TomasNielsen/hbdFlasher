@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://unpkg.com/pako@2.0.4/dist/pako.min.js"></script>
-    <script src="https://unpkg.com/esptool-js@0.4.6/bundle.js"></script>
+    <!-- Try jsdelivr CDN with a working version -->
+    <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.3.1/bundle.js"></script>
     <script>
-        // Expose the classes from the global esptool bundle
+        // Debug what's available
+        console.log('window after esptool load:', Object.keys(window).filter(k => k.toLowerCase().includes('esp') || k.toLowerCase().includes('transport')));
+        console.log('window.esptool:', window.esptool);
+        console.log('window.Transport:', window.Transport);
+        console.log('window.ESPLoader:', window.ESPLoader);
+        
+        // Try different ways to access the classes
         window.esptoolPackage = {
-            Transport: window.Transport || window.esptool?.Transport,
-            ESPLoader: window.ESPLoader || window.esptool?.ESPLoader
+            Transport: window.Transport || window.esptool?.Transport || window.ESPLoader?.Transport,
+            ESPLoader: window.ESPLoader || window.esptool?.ESPLoader || window.ESPLoader?.ESPLoader
         };
         console.log('esptool-js loaded:', window.esptoolPackage);
     </script>
