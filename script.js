@@ -121,16 +121,12 @@ class ESP32Flasher {
                 throw new Error('esptool-js Transport not available');
             }
             
-            // Request port access
+            // Request port access but don't create transport yet
             const port = await navigator.serial.requestPort();
             this.connectedPort = port;
             
-            console.log('🔌 Port selected, creating transport...');
-            
-            // Create Transport for esptool-js
-            this.transport = new window.esptoolPackage.Transport(port);
-            
-            console.log('✅ Transport created successfully');
+            console.log('🔌 Port selected and stored for later use');
+            console.log('✅ Port ready for flashing');
             
             this.portConnected = true;
             
@@ -150,7 +146,7 @@ class ESP32Flasher {
     }
 
     async handleFlash() {
-        if (!this.portConnected || !this.transport) {
+        if (!this.portConnected || !this.connectedPort) {
             alert('No device connected. Please go back to Step 1 and connect your device.');
             return;
         }
@@ -168,7 +164,10 @@ class ESP32Flasher {
             console.log('   --before default_reset --after hard_reset --no-stub');
             console.log('   --flash_mode dio --flash_freq 80m --flash_size 16MB');
             
-            // Create ESPLoader with exact Windows flasher configuration
+            // Create fresh Transport and ESPLoader for this flash operation
+            console.log('🔌 Creating fresh transport and ESPLoader...');
+            this.transport = new window.esptoolPackage.Transport(this.connectedPort);
+            
             this.espLoader = new window.esptoolPackage.ESPLoader({
                 transport: this.transport,
                 baudrate: 115200, // Match Windows flasher baudrate
@@ -182,28 +181,11 @@ class ESP32Flasher {
             // Your Windows flasher uses --chip esp32s3, let's set that explicitly
             console.log('⚙️ Configuring for ESP32-S3 chip type...');
             
-            // Try different connection approaches to match Windows flasher
+            // Connect to ESP32 with single attempt to avoid port conflicts
             console.log('🔗 Connecting to ESP32...');
-            let chip;
-            
-            // First try: ESP32-S3 specific connection
-            try {
-                console.log('🔍 Attempting ESP32-S3 connection...');
-                chip = await this.espLoader.connect();
-                console.log('✅ Connected successfully:', chip);
-            } catch (error) {
-                console.log('⚠️ Standard connection failed:', error.message);
-                
-                // Second try: with specific reset sequence
-                try {
-                    console.log('🔍 Attempting connection with manual reset...');
-                    chip = await this.espLoader.connect('no_reset');
-                    console.log('✅ Connected with no_reset:', chip);
-                } catch (error2) {
-                    console.log('⚠️ no_reset connection failed:', error2.message);
-                    throw new Error(`Failed to connect to ESP32: ${error.message}`);
-                }
-            }
+            console.log('🔍 Attempting ESP32-S3 connection...');
+            const chip = await this.espLoader.connect();
+            console.log('✅ Connected successfully:', chip);
             
             console.log('Chip info:', {
                 chipName: chip,
