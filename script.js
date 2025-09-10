@@ -167,11 +167,7 @@ class ESP32Flasher {
             // Bypass esptool-js and implement direct ESP32-S3 flash protocol
             console.log('🔧 Using direct Web Serial ESP32-S3 flash protocol...');
             
-            // Perform hardware reset sequence before connection (--before default_reset)
-            console.log('🔄 Performing hardware reset sequence...');
-            await this.performHardwareReset();
-            
-            // Initialize direct serial communication
+            // Initialize direct serial communication first
             console.log('🔗 Opening serial port for direct communication...');
             await this.connectedPort.open({
                 baudRate: 115200,
@@ -183,6 +179,14 @@ class ESP32Flasher {
             // Get readers/writers for communication
             this.reader = this.connectedPort.readable.getReader();
             this.writer = this.connectedPort.writable.getWriter();
+            
+            // Now perform hardware reset to enter bootloader (--before default_reset)
+            console.log('🔄 Performing hardware reset to enter bootloader...');
+            await this.performHardwareReset();
+            
+            // Wait for bootloader to initialize
+            console.log('⏳ Waiting for ESP32-S3 bootloader to initialize...');
+            await this.delay(2000);
             
             console.log('📡 Attempting ESP32-S3 sync...');
             await this.esp32Sync();
