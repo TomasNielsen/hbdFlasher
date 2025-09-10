@@ -108,6 +108,19 @@ class ESP32Flasher {
         connectButton.innerHTML = '<span class="button-text">Connecting...</span>';
         
         try {
+            // Wait for esptool to be ready
+            if (!window.esptoolReady) {
+                console.log('⏳ Waiting for esptool-js to load...');
+                await new Promise(resolve => {
+                    window.addEventListener('esptool-ready', resolve, { once: true });
+                });
+            }
+            
+            // Check if esptool is available
+            if (!window.esptoolPackage?.Transport) {
+                throw new Error('esptool-js Transport not available');
+            }
+            
             // Request port access
             const port = await navigator.serial.requestPort();
             this.connectedPort = port;
