@@ -1,6 +1,6 @@
 // ESP32 Web Flasher - Smart UX with Hardware Reset Control
-// Handles step progression, browser compatibility, and ESP32 bootloader timing
-// Version: 2025-01-10 with proper DTR/RTS hardware reset implementation
+// Handles step progression, browser compatibility, and ESP32 bootloader timing  
+// Version: 2025-01-10-v2 with improved port state management and hardware reset
 
 class ESP32Flasher {
     constructor() {
@@ -122,15 +122,45 @@ class ESP32Flasher {
         // Hook into the ESP Web Tools button click directly
         const activateButton = installButton.querySelector('button[slot="activate"]');
         if (activateButton) {
-            const originalClick = activateButton.click.bind(activateButton);
-            activateButton.click = () => {
-                console.log('🎯 ESP Web Tools button clicked - triggering hardware reset first!');
-                this.performHardwareReset().then(() => {
-                    // Small delay to ensure reset completes before ESP Web Tools starts
-                    setTimeout(() => originalClick(), 200);
-                });
-            };
-            console.log('✅ Hooked into ESP Web Tools button click');
+            console.log('🎯 Found ESP Web Tools activate button, setting up click hook...');
+            
+            // Replace the click handler with our hardware reset sequence
+            activateButton.addEventListener('click', async (event) => {
+                console.log('🎯 ESP Web Tools button clicked - intercepting for hardware reset!');
+                event.preventDefault();
+                event.stopPropagation();
+                
+                // Perform hardware reset before ESP Web Tools starts
+                console.log('⚡ Triggering hardware reset before ESP Web Tools...');
+                const resetSuccess = await this.performHardwareReset();
+                
+                if (resetSuccess) {
+                    console.log('✅ Hardware reset completed - device should be in bootloader mode');
+                } else {
+                    console.warn('⚠️ Hardware reset failed - trying fallback strategies');
+                    await this.attemptFallbackReset();
+                }
+                
+                // Small delay then trigger the original ESP Web Tools flow
+                setTimeout(() => {
+                    console.log('🚀 Now starting ESP Web Tools...');
+                    // Trigger ESP Web Tools by dispatching a new click event
+                    const clickEvent = new MouseEvent('click', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+                    // Remove our handler temporarily to avoid infinite loop
+                    activateButton.removeEventListener('click', arguments.callee);
+                    activateButton.dispatchEvent(clickEvent);
+                    // Add our handler back
+                    setTimeout(() => {
+                        activateButton.addEventListener('click', arguments.callee);
+                    }, 100);
+                }, 100);
+            }, true); // Use capture to ensure we intercept first
+            
+            console.log('✅ Hardware reset button hook installed');
         }
 
         // Monitor for when ESP Web Tools creates dialogs
@@ -191,15 +221,42 @@ class ESP32Flasher {
         try {
             console.log('⚡ Starting ESP32 hardware reset sequence...');
             
-            // Check if setSignals is available
-            if (typeof this.connectedPort.setSignals !== 'function') {
+            // Ensure port is open
+            if (!this.connectedPort.readable || !this.connectedPort.writable) {
+                console.log('🔌 Port not open, attempting to open...');
+                await this.connectedPort.open({
+                    baudRate: 115200,
+                    dataBits: 8,
+                    stopBits: 1,
+                    parity: 'none',
+                    flowControl: 'none'
+                });
+                console.log('✅ Port opened for hardware reset');
+            }
+            
+            // Enhanced API validation
+            const hasSetSignals = typeof this.connectedPort.setSignals === 'function';
+            const hasGetSignals = typeof this.connectedPort.getSignals === 'function';
+            
+            console.log('🔍 WebSerial API capabilities:');
+            console.log(`   setSignals(): ${hasSetSignals ? '✅' : '❌'}`);
+            console.log(`   getSignals(): ${hasGetSignals ? '✅' : '❌'}`);
+            
+            if (!hasSetSignals) {
                 console.error('❌ SerialPort.setSignals() not supported by this browser/port');
                 return false;
             }
 
             // Get current signal state for debugging
-            const currentSignals = await this.connectedPort.getSignals();
-            console.log('📊 Current port signals:', currentSignals);
+            let currentSignals = null;
+            if (hasGetSignals) {
+                try {
+                    currentSignals = await this.connectedPort.getSignals();
+                    console.log('📊 Current port signals:', currentSignals);
+                } catch (error) {
+                    console.warn('⚠️ Could not read current signals:', error.message);
+                }
+            }
 
             console.log('🔧 ESP32 hardware reset sequence:');
             console.log('   DTR controls EN (enable/reset) - LOW = reset, HIGH = run');
@@ -235,8 +292,14 @@ class ESP32Flasher {
             });
 
             // Check final signal state
-            const finalSignals = await this.connectedPort.getSignals();
-            console.log('📊 Final port signals:', finalSignals);
+            if (hasGetSignals) {
+                try {
+                    const finalSignals = await this.connectedPort.getSignals();
+                    console.log('📊 Final port signals:', finalSignals);
+                } catch (error) {
+                    console.warn('⚠️ Could not read final signals:', error.message);
+                }
+            }
 
             console.log('✅ Hardware reset sequence completed - ESP32 should be in bootloader mode');
             console.log('🎯 Device is now ready for ESP Web Tools flashing');
@@ -245,9 +308,15 @@ class ESP32Flasher {
         } catch (error) {
             console.error('❌ Hardware reset failed:', error);
             console.error('💡 Possible causes:');
-            console.error('   - SerialPort.setSignals() not supported');
-            console.error('   - Port not connected properly');
-            console.error('   - Hardware doesn\'t support DTR/RTS control');
+            console.error('   - SerialPort.setSignals() not supported by this hardware');
+            console.error('   - Port access denied or locked');
+            console.error('   - USB-to-serial adapter doesn\'t expose DTR/RTS');
+            console.error('   - Browser security restrictions');
+            
+            // Log detailed error information
+            if (error.name) console.error(`   Error type: ${error.name}`);
+            if (error.message) console.error(`   Error message: ${error.message}`);
+            
             return false;
         }
     }
@@ -255,6 +324,72 @@ class ESP32Flasher {
     // Legacy method - now handled by button click hook
     setupHardwareResetTrigger() {
         console.log('⚠️ Legacy setupHardwareResetTrigger - hardware reset is now handled by button click hook');
+    }
+
+    // Fallback strategies when hardware reset fails
+    async attemptFallbackReset() {
+        console.log('🔄 Attempting fallback reset strategies...');
+        
+        try {
+            // Strategy 1: Try port close/reopen cycle to reset device state
+            if (this.connectedPort && this.connectedPort.readable) {
+                console.log('📋 Fallback 1: Port close/reopen cycle');
+                await this.connectedPort.close();
+                await this.delay(200);
+                await this.connectedPort.open({
+                    baudRate: 115200,
+                    dataBits: 8,
+                    stopBits: 1,
+                    parity: 'none',
+                    flowControl: 'none'
+                });
+                console.log('✅ Port cycle completed');
+            }
+
+            // Strategy 2: Send break signal if supported
+            if (typeof this.connectedPort.setSignals === 'function') {
+                try {
+                    console.log('📋 Fallback 2: Attempting break signal');
+                    await this.connectedPort.setSignals({ break: true });
+                    await this.delay(100);
+                    await this.connectedPort.setSignals({ break: false });
+                    console.log('✅ Break signal sent');
+                } catch (error) {
+                    console.log('⚠️ Break signal not supported');
+                }
+            }
+
+            // Strategy 3: User instruction fallback
+            console.log('📋 Fallback 3: Instructing user for manual reset');
+            this.showManualResetInstructions();
+
+        } catch (error) {
+            console.error('❌ Fallback strategies failed:', error);
+        }
+    }
+
+    // Show manual reset instructions to user
+    showManualResetInstructions() {
+        console.log('📢 Showing manual reset instructions to user');
+        
+        // Could show a modal or update the UI with instructions
+        const instructions = `
+🔧 Manual Reset Required:
+
+If flashing fails, try this:
+1. Disconnect USB cable
+2. Hold BOOT button on device  
+3. Reconnect USB while holding BOOT
+4. Release BOOT button
+5. Click Flash again
+
+Your device should now be in bootloader mode.
+        `;
+        
+        console.log(instructions);
+        
+        // For now, just log to console - could enhance with UI modal later
+        // This provides fallback information that can help users troubleshoot
     }
 
     // Utility function for delays
@@ -268,9 +403,29 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Simple port reuse without workarounds
-            navigator.serial.requestPort = () => {
-                console.log('🔄 Using existing port from Step 1');
+            // Enhanced port reuse with state management
+            navigator.serial.requestPort = async () => {
+                console.log('🔄 ESP Web Tools requesting port - analyzing current state...');
+                console.log('📊 Current port state:', {
+                    exists: !!this.connectedPort,
+                    readable: !!this.connectedPort?.readable,
+                    writable: !!this.connectedPort?.writable,
+                    readableLocked: this.connectedPort?.readable?.locked || false,
+                    writableLocked: this.connectedPort?.writable?.locked || false
+                });
+                
+                // Close our connection so ESP Web Tools can open it
+                if (this.connectedPort && (this.connectedPort.readable || this.connectedPort.writable)) {
+                    try {
+                        console.log('🔓 Releasing port for ESP Web Tools...');
+                        await this.connectedPort.close();
+                        console.log('✅ Port closed and released for ESP Web Tools');
+                    } catch (error) {
+                        console.warn('⚠️ Error releasing port (may be already closed):', error.message);
+                    }
+                }
+                
+                console.log('🎁 Returning port to ESP Web Tools...');
                 return Promise.resolve(this.connectedPort);
             };
             
@@ -329,30 +484,56 @@ class ESP32Flasher {
         try {
             console.log('🧪 Testing SerialPort.setSignals() capability...');
             
-            if (typeof this.connectedPort.setSignals !== 'function') {
-                console.log('❌ SerialPort.setSignals() not available');
+            // Check port state
+            const isOpen = this.connectedPort.readable && this.connectedPort.writable;
+            console.log(`📊 Port state: ${isOpen ? 'Open ✅' : 'Closed ❌'}`);
+            
+            // Check API availability
+            const hasSetSignals = typeof this.connectedPort.setSignals === 'function';
+            const hasGetSignals = typeof this.connectedPort.getSignals === 'function';
+            
+            console.log('🔍 API Availability:');
+            console.log(`   setSignals(): ${hasSetSignals ? '✅' : '❌'}`);
+            console.log(`   getSignals(): ${hasGetSignals ? '✅' : '❌'}`);
+            
+            if (!hasSetSignals) {
+                console.log('❌ SerialPort.setSignals() not available in this browser');
                 return false;
             }
 
-            if (typeof this.connectedPort.getSignals !== 'function') {
-                console.log('❌ SerialPort.getSignals() not available');
+            if (!isOpen) {
+                console.log('⚠️ Port not open, cannot test signal control');
                 return false;
             }
 
             // Test getting current signals
-            const signals = await this.connectedPort.getSignals();
-            console.log('✅ SerialPort.getSignals() works:', signals);
+            let signals = null;
+            if (hasGetSignals) {
+                try {
+                    signals = await this.connectedPort.getSignals();
+                    console.log('✅ SerialPort.getSignals() works:', signals);
+                } catch (error) {
+                    console.log('⚠️ getSignals() failed:', error.message);
+                }
+            }
 
-            // Test setting signals (non-disruptive test)
-            await this.connectedPort.setSignals({
-                dataTerminalReady: signals.dataTerminalReady || true,
-                requestToSend: signals.requestToSend || true
-            });
-            console.log('✅ SerialPort.setSignals() works');
+            // Test setting signals (non-disruptive test - restore current state)
+            try {
+                await this.connectedPort.setSignals({
+                    dataTerminalReady: signals?.dataTerminalReady !== false,
+                    requestToSend: signals?.requestToSend !== false
+                });
+                console.log('✅ SerialPort.setSignals() works - hardware reset should be possible');
+                return true;
+            } catch (error) {
+                console.log('❌ setSignals() test failed:', error.message);
+                return false;
+            }
 
-            return true;
         } catch (error) {
             console.log('❌ Hardware reset capability test failed:', error);
+            console.log(`   Error type: ${error.name}`);
+            console.log(`   Error message: ${error.message}`);
             return false;
         }
     }
@@ -370,9 +551,34 @@ class ESP32Flasher {
             // Request port access and store it
             const port = await navigator.serial.requestPort();
             this.connectedPort = port;
-            this.portConnected = true;
             
-            console.log('✅ Port selected and stored for later use');
+            console.log('🔌 Port selected, analyzing port capabilities...');
+            console.log('📊 Port info:', {
+                constructor: port.constructor.name,
+                readable: !!port.readable,
+                writable: !!port.writable,
+                hasSetSignals: typeof port.setSignals === 'function',
+                hasGetSignals: typeof port.getSignals === 'function'
+            });
+            
+            // Open the port immediately to enable signal control
+            console.log('🔓 Opening port for signal control...');
+            await this.connectedPort.open({
+                baudRate: 115200,
+                dataBits: 8,
+                stopBits: 1,
+                parity: 'none',
+                flowControl: 'none'
+            });
+            
+            this.portConnected = true;
+            console.log('✅ Port opened successfully');
+            console.log('📊 Port state after opening:', {
+                readable: !!this.connectedPort.readable,
+                writable: !!this.connectedPort.writable,
+                readableLocked: this.connectedPort.readable?.locked || false,
+                writableLocked: this.connectedPort.writable?.locked || false
+            });
             
             // Success - device connected
             this.updateConnectionSuccess();
@@ -388,7 +594,7 @@ class ESP32Flasher {
                 
                 // Auto-advance to step 2
                 this.advanceToStep(2);
-            }, 1500);
+            }, 500); // Reduced delay since port is already open
             
         } catch (error) {
             // User cancelled or connection failed
