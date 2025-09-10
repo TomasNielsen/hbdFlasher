@@ -295,26 +295,27 @@ class ESP32Flasher {
             console.log('🚀 Starting direct firmware flash with esptool-js...');
             
             // Create transport for the existing port
-            const transport = new esptool.Transport(this.connectedPort);
+            const transport = new Transport(this.connectedPort);
             
-            // Create ESPLoader instance
-            const loader = new esptool.ESPLoader(transport, 115200);
+            // Create ESPLoader instance  
+            const loader = new ESPLoader({
+                transport: transport,
+                baudrate: 115200
+            });
             
             // Connect and detect chip
-            await loader.main_fn();
+            await loader.main();
             console.log('✅ Connected to ESP32 chip');
             
             // Load firmware files for the selected version
             const firmwareFiles = await this.loadFirmwareFiles(this.selectedVersion);
             
-            // Flash firmware
-            await loader.flash_images(
-                firmwareFiles,
-                'flash',  // mode
-                true,     // compress
-                null,     // leave_running
-                this.updateFlashProgress.bind(this)  // progress callback
-            );
+            // Flash firmware using writeFlash API
+            await loader.writeFlash({
+                fileArray: firmwareFiles,
+                compress: true,
+                reportProgress: this.updateFlashProgress.bind(this)
+            });
             
             console.log('✅ Firmware flashing completed successfully!');
             this.handleFlashSuccess();
