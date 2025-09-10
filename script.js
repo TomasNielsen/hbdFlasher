@@ -296,12 +296,12 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Override with our port and start immediate bootloader communication
+            // Override with our port and send immediate sync
             navigator.serial.requestPort = async () => {
-                console.log('🔄 Using existing port instead of showing port selection dialog');
+                console.log('🔄 Using existing port and sending immediate sync to bootloader');
                 
-                // Start keep-alive communication immediately to prevent 3-second timeout
-                this.startBootloaderKeepAlive();
+                // Send immediate sync to prevent 3-second timeout
+                await this.sendEmergencySync();
                 
                 return Promise.resolve(this.connectedPort);
             };
@@ -311,43 +311,107 @@ class ESP32Flasher {
         }
     }
 
-    // Start sending keep-alive signals to bootloader to prevent 3-second timeout
-    startBootloaderKeepAlive() {
-        if (this.bootloaderKeepAlive) {
-            clearInterval(this.bootloaderKeepAlive);
-        }
-
-        console.log('🔄 Starting bootloader keep-alive signals...');
-        
-        // Send a simple sync byte every 500ms to keep bootloader active
-        this.bootloaderKeepAlive = setInterval(async () => {
-            try {
-                if (this.connectedPort && this.connectedPort.writable) {
-                    const writer = this.connectedPort.writable.getWriter();
-                    // Send a simple byte to maintain communication
+    // Send emergency sync immediately when ESP Web Tools requests port
+    async sendEmergencySync() {
+        try {
+            console.log('🚨 Sending emergency sync to maintain bootloader mode...');
+            
+            if (this.connectedPort && this.connectedPort.writable) {
+                const writer = this.connectedPort.writable.getWriter();
+                
+                // Send multiple rapid sync bytes to ensure bootloader stays active
+                for (let i = 0; i < 10; i++) {
                     await writer.write(new Uint8Array([0x00]));
-                    writer.releaseLock();
-                    console.log('📡 Sent bootloader keep-alive signal');
+                    await this.delay(5); // Very short delay
                 }
-            } catch (error) {
-                // Stop if port becomes unavailable (ESP Web Tools took over)
-                console.log('✅ Bootloader keep-alive stopped - ESP Web Tools active');
-                this.stopBootloaderKeepAlive();
+                
+                writer.releaseLock();
+                console.log('✅ Emergency sync completed - bootloader should stay active');
             }
-        }, 500); // Every 500ms
-
-        // Auto-stop after 30 seconds as safety measure
-        setTimeout(() => {
-            this.stopBootloaderKeepAlive();
-        }, 30000);
+        } catch (error) {
+            console.warn('⚠️ Emergency sync failed:', error.message);
+        }
     }
 
-    // Stop bootloader keep-alive signals
+    // Monitor ESP Web Tools and send immediate sync when it's ready to communicate
+    startBootloaderKeepAlive() {
+        console.log('🔄 Starting ESP Web Tools monitoring for immediate sync...');
+        
+        // Monitor ESP Web Tools communication state
+        this.monitorESPWebTools();
+    }
+
+    // Monitor ESP Web Tools and trigger immediate bootloader sync
+    monitorESPWebTools() {
+        if (this.espMonitorInterval) {
+            clearInterval(this.espMonitorInterval);
+        }
+
+        this.espMonitorInterval = setInterval(() => {
+            // Look for ESP Web Tools state indicators in console or DOM
+            const espLogs = document.querySelectorAll('[data-message*="esptool"], [data-message*="Connecting"]');
+            
+            // Check if ESP Web Tools is about to start communication
+            if (this.detectESPToolsReady()) {
+                console.log('🚀 ESP Web Tools ready - sending immediate bootloader sync!');
+                this.sendImmediateSync();
+                clearInterval(this.espMonitorInterval);
+                this.espMonitorInterval = null;
+            }
+        }, 100); // Check every 100ms
+
+        // Safety timeout
+        setTimeout(() => {
+            if (this.espMonitorInterval) {
+                clearInterval(this.espMonitorInterval);
+                this.espMonitorInterval = null;
+                console.log('⚠️ ESP Web Tools monitoring timeout');
+            }
+        }, 15000);
+    }
+
+    // Detect when ESP Web Tools is ready to communicate
+    detectESPToolsReady() {
+        // Look for signs that ESP Web Tools is about to start
+        const logElements = document.querySelectorAll('.log-entry, [data-log], [data-message]');
+        for (const element of logElements) {
+            const text = element.textContent || '';
+            if (text.includes('esptool.js') || 
+                text.includes('Connecting...') || 
+                text.includes('Serial port')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Send immediate sync to bootloader to prevent timeout
+    async sendImmediateSync() {
+        try {
+            if (this.connectedPort && this.connectedPort.writable) {
+                const writer = this.connectedPort.writable.getWriter();
+                
+                // Send rapid sync commands
+                for (let i = 0; i < 5; i++) {
+                    const syncByte = new Uint8Array([0x00]);
+                    await writer.write(syncByte);
+                    await this.delay(10);
+                }
+                
+                writer.releaseLock();
+                console.log('✅ Sent immediate bootloader sync signals');
+            }
+        } catch (error) {
+            console.log('⚠️ Immediate sync failed:', error.message);
+        }
+    }
+
+    // Stop bootloader monitoring
     stopBootloaderKeepAlive() {
-        if (this.bootloaderKeepAlive) {
-            clearInterval(this.bootloaderKeepAlive);
-            this.bootloaderKeepAlive = null;
-            console.log('🛑 Stopped bootloader keep-alive signals');
+        if (this.espMonitorInterval) {
+            clearInterval(this.espMonitorInterval);
+            this.espMonitorInterval = null;
+            console.log('🛑 Stopped ESP Web Tools monitoring');
         }
     }
 
