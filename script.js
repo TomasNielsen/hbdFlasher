@@ -178,14 +178,32 @@ class ESP32Flasher {
                 }
             });
             
-            // Your Windows flasher uses --chip esp32s3, let's set that explicitly
-            console.log('⚙️ Configuring for ESP32-S3 chip type...');
+            // Force ESP32-S3 chip type to match Windows flasher --chip esp32s3
+            console.log('⚙️ Forcing ESP32-S3 chip type to skip auto-detection...');
             
-            // Connect to ESP32 with single attempt to avoid port conflicts
-            console.log('🔗 Connecting to ESP32...');
-            console.log('🔍 Attempting ESP32-S3 connection...');
-            const chip = await this.espLoader.connect();
-            console.log('✅ Connected successfully:', chip);
+            // Connect to ESP32-S3 without auto-detection
+            console.log('🔗 Connecting to ESP32-S3...');
+            console.log('🔍 Attempting ESP32-S3 specific connection...');
+            
+            // Try different approaches to force ESP32-S3 mode
+            let chip;
+            try {
+                // First attempt: disable detection and force connect
+                console.log('   Trying connect with detecting=false...');
+                chip = await this.espLoader.connect('default_reset', 7, false);
+                console.log('✅ Connected with detection disabled:', chip);
+            } catch (error) {
+                console.log('⚠️ Detection disabled failed:', error.message);
+                // Fallback: try manual chip detection first
+                try {
+                    console.log('   Trying manual detectChip...');
+                    chip = await this.espLoader.detectChip('default_reset');
+                    console.log('✅ Chip detected:', chip);
+                } catch (error2) {
+                    console.log('⚠️ Manual detect failed:', error2.message);
+                    throw new Error(`ESP32-S3 connection failed: ${error.message}`);
+                }
+            }
             
             console.log('Chip info:', {
                 chipName: chip,
