@@ -183,13 +183,28 @@ class ESP32Flasher {
             console.log('🔗 Connecting to ESP32 with default_reset...');
             const chip = await this.espLoader.connect('default_reset');
             console.log('✅ Connected to chip:', chip);
+            console.log('Chip info:', {
+                chipName: chip,
+                features: this.espLoader.getChipFeatures && this.espLoader.getChipFeatures(),
+                macAddr: this.espLoader.readMac && await this.espLoader.readMac().catch(e => 'Could not read MAC')
+            });
             
             // Load firmware files
             console.log('📁 Loading firmware files...');
             const firmwareData = await this.loadFirmwareFiles();
+            console.log('✅ Firmware files loaded:', firmwareData.length, 'files');
             
             // Flash firmware with exact Windows flasher parameters
             console.log('⚡ Flashing firmware with Windows flasher parameters...');
+            console.log('Flash options:', {
+                fileCount: firmwareData.length,
+                flashSize: '16MB',
+                flashMode: 'dio',
+                flashFreq: '80m',
+                eraseAll: false,
+                compress: true
+            });
+            
             await this.espLoader.writeFlash({
                 fileArray: firmwareData,
                 flashSize: '16MB',    // --flash_size 16MB
@@ -217,12 +232,23 @@ class ESP32Flasher {
             
         } catch (error) {
             console.error('❌ Flashing failed:', error);
+            console.error('Error details:', {
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
             
             // Hide progress and show button
             flashProgress.classList.add('hidden');
             flashButton.style.display = 'flex';
             
-            alert(`Flashing failed: ${error.message}. Please try again.`);
+            // Show detailed error information
+            const errorMsg = error.message || 'Unknown error occurred';
+            
+            // Try to recover the device
+            await this.attemptDeviceRecovery();
+            
+            alert(`Flashing failed: ${errorMsg}. Please try again.\n\nDevice recovery attempted. Try disconnecting and reconnecting USB if device is not responding.`);
         }
     }
 
@@ -260,6 +286,30 @@ class ESP32Flasher {
         
         console.log(`✅ All ${fileArray.length} firmware files loaded successfully`);
         return fileArray;
+    }
+
+    async attemptDeviceRecovery() {
+        console.log('🔧 Attempting device recovery...');
+        
+        try {
+            if (this.espLoader) {
+                console.log('🔄 Trying soft reset...');
+                await this.espLoader.softReset();
+            }
+        } catch (e) {
+            console.log('⚠️ Soft reset failed:', e.message);
+        }
+        
+        try {
+            if (this.espLoader) {
+                console.log('🔄 Trying hard reset...');
+                await this.espLoader.hardReset();
+            }
+        } catch (e) {
+            console.log('⚠️ Hard reset failed:', e.message);
+        }
+        
+        console.log('🔧 Device recovery attempt completed');
     }
 
     updateConnectionSuccess() {
