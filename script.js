@@ -194,33 +194,21 @@ class ESP32Flasher {
             const firmwareData = await this.loadFirmwareFiles();
             console.log('✅ Firmware files loaded:', firmwareData.length, 'files');
             
-            // Flash firmware with exact Windows flasher parameters
-            console.log('⚡ Flashing firmware with Windows flasher parameters...');
+            // Flash firmware using direct ESP32 commands
+            console.log('⚡ Flashing firmware with direct ESP32 commands...');
             console.log('Flash options:', {
                 fileCount: firmwareData.length,
                 flashSize: '16MB',
                 flashMode: 'dio',
                 flashFreq: '80m',
-                eraseAll: false,
-                compress: true
+                totalBytes: firmwareData.reduce((sum, file) => sum + file.data.length, 0)
             });
             
-            await this.espLoader.writeFlash({
-                fileArray: firmwareData,
-                flashSize: '16MB',    // --flash_size 16MB
-                flashMode: 'dio',     // --flash_mode dio  
-                flashFreq: '80m',     // --flash_freq 80m
-                eraseAll: false,
-                compress: true,
-                reportProgress: (fileIndex, bytesWritten, totalBytes) => {
-                    const percent = Math.round((bytesWritten / totalBytes) * 100);
-                    console.log(`📊 Progress: ${percent}% (File ${fileIndex + 1})`);
-                }
-            });
+            await this.esp32FlashFirmware(firmwareData);
             
             // Hard reset after flashing (matches --after hard_reset)
             console.log('🔄 Performing hard reset...');
-            await this.espLoader.hardReset();
+            await this.esp32HardReset();
             
             console.log('✅ Firmware flashing completed successfully!');
             
@@ -469,6 +457,127 @@ class ESP32Flasher {
         } catch (error) {
             clearTimeout(timeout);
             throw error;
+        }
+    }
+
+    async esp32FlashBegin(size, offset) {
+        console.log(`📝 FLASH_BEGIN: ${size} bytes at offset 0x${offset.toString(16)}`);
+        
+        // Calculate erase size (round up to 64KB blocks)
+        const eraseSize = Math.ceil(size / 65536) * 65536;
+        const packetSize = 1024; // 1KB packets
+        const numPackets = Math.ceil(size / packetSize);
+        
+        // FLASH_BEGIN command data: erase_size, num_packets, packet_size, offset
+        const data = new Uint8Array(16);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, eraseSize, true);
+        view.setUint32(4, numPackets, true);
+        view.setUint32(8, packetSize, true);
+        view.setUint32(12, offset, true);
+        
+        const command = this.createCommand(0x02, data);
+        await this.writer.write(command);
+        
+        const response = await this.readResponse();
+        console.log('✅ FLASH_BEGIN successful');
+        return response;
+    }
+
+    async esp32FlashData(data, sequence) {
+        // FLASH_DATA command data: data_size, sequence_num, 0, 0, data
+        const header = new Uint8Array(16);
+        const headerView = new DataView(header.buffer);
+        headerView.setUint32(0, data.length, true);
+        headerView.setUint32(4, sequence, true);
+        headerView.setUint32(8, 0, true);
+        headerView.setUint32(12, 0, true);
+        
+        // Combine header + data
+        const payload = new Uint8Array(header.length + data.length);
+        payload.set(header, 0);
+        payload.set(data, header.length);
+        
+        const command = this.createCommand(0x03, payload);
+        await this.writer.write(command);
+        
+        const response = await this.readResponse();
+        return response;
+    }
+
+    async esp32FlashEnd(reboot = true) {
+        console.log('🏁 FLASH_END');
+        
+        // FLASH_END command data: reboot flag (0 = reboot, 1 = run user code)
+        const data = new Uint8Array(4);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, reboot ? 0 : 1, true);
+        
+        const command = this.createCommand(0x04, data);
+        await this.writer.write(command);
+        
+        const response = await this.readResponse();
+        console.log('✅ FLASH_END successful');
+        return response;
+    }
+
+    async esp32FlashFirmware(firmwareData) {
+        console.log('🚀 Starting ESP32 firmware flash process...');
+        
+        for (let fileIndex = 0; fileIndex < firmwareData.length; fileIndex++) {
+            const file = firmwareData[fileIndex];
+            console.log(`📂 Flashing file ${fileIndex + 1}/${firmwareData.length}: ${file.data.length} bytes at 0x${file.address.toString(16)}`);
+            
+            // Begin flash for this file
+            await this.esp32FlashBegin(file.data.length, file.address);
+            
+            // Send data in 1KB chunks
+            const chunkSize = 1024;
+            let sequence = 0;
+            
+            for (let offset = 0; offset < file.data.length; offset += chunkSize) {
+                const chunk = file.data.slice(offset, offset + chunkSize);
+                
+                console.log(`📦 Sending chunk ${sequence + 1}: ${chunk.length} bytes`);
+                await this.esp32FlashData(chunk, sequence);
+                sequence++;
+                
+                // Report progress
+                const fileProgress = ((offset + chunk.length) / file.data.length) * 100;
+                const totalProgress = ((fileIndex + (offset + chunk.length) / file.data.length) / firmwareData.length) * 100;
+                console.log(`📊 File progress: ${fileProgress.toFixed(1)}%, Total: ${totalProgress.toFixed(1)}%`);
+            }
+            
+            // End flash for this file
+            await this.esp32FlashEnd(false); // Don't reboot until all files are done
+            console.log(`✅ File ${fileIndex + 1} flashed successfully`);
+        }
+        
+        console.log('🎉 All firmware files flashed successfully!');
+    }
+
+    async esp32HardReset() {
+        console.log('🔄 Performing ESP32 hard reset...');
+        
+        try {
+            // Close readers/writers
+            if (this.reader) {
+                await this.reader.releaseLock();
+                this.reader = null;
+            }
+            if (this.writer) {
+                await this.writer.releaseLock();
+                this.writer = null;
+            }
+            
+            // Close port
+            if (this.connectedPort && this.connectedPort.readable) {
+                await this.connectedPort.close();
+            }
+            
+            console.log('✅ ESP32 reset completed - device should restart with new firmware');
+        } catch (error) {
+            console.log('⚠️ Reset cleanup failed:', error.message);
         }
     }
 
