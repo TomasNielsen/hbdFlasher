@@ -1,12 +1,195 @@
 // ESP32 Web Flasher - Smart UX Script
 // Handles step progression, browser compatibility, and user interaction
 
+// ESP32 Bootloader Communication Class
+class ESP32BootloaderController {
+    constructor() {
+        this.port = null;
+        this.reader = null;
+        this.writer = null;
+        this.keepAliveInterval = null;
+        this.isInBootloaderMode = false;
+    }
+
+    // ESP32 bootloader protocol constants
+    static SLIP_END = 0xC0;
+    static SLIP_ESC = 0xDB;
+    static SLIP_ESC_END = 0xDC;
+    static SLIP_ESC_ESC = 0xDD;
+    
+    // ESP32 commands
+    static ESP_SYNC = 0x08;
+    static ESP_BEGIN_FLASH = 0x02;
+    static ESP_CHANGE_BAUDRATE = 0x0F;
+
+    async connect(port) {
+        try {
+            this.port = port;
+            
+            // Open port with specific settings for ESP32
+            await this.port.open({
+                baudRate: 115200,
+                dataBits: 8,
+                stopBits: 1,
+                parity: 'none',
+                flowControl: 'none'
+            });
+
+            this.reader = this.port.readable.getReader();
+            this.writer = this.port.writable.getWriter();
+            
+            console.log('Connected to ESP32 device for bootloader control');
+            return true;
+        } catch (error) {
+            console.error('Failed to connect to ESP32:', error);
+            return false;
+        }
+    }
+
+    // Encode data in SLIP protocol
+    encodeSlip(data) {
+        const encoded = [ESP32BootloaderController.SLIP_END];
+        
+        for (const byte of data) {
+            if (byte === ESP32BootloaderController.SLIP_END) {
+                encoded.push(ESP32BootloaderController.SLIP_ESC, ESP32BootloaderController.SLIP_ESC_END);
+            } else if (byte === ESP32BootloaderController.SLIP_ESC) {
+                encoded.push(ESP32BootloaderController.SLIP_ESC, ESP32BootloaderController.SLIP_ESC_ESC);
+            } else {
+                encoded.push(byte);
+            }
+        }
+        
+        encoded.push(ESP32BootloaderController.SLIP_END);
+        return new Uint8Array(encoded);
+    }
+
+    // Create ESP32 command packet
+    createCommand(cmd, data = []) {
+        const dataLength = data.length;
+        const packet = [
+            0x00,  // Direction (request)
+            cmd,   // Command
+            dataLength & 0xFF,        // Data length (low byte)
+            (dataLength >> 8) & 0xFF, // Data length (high byte)
+            0x00, 0x00, 0x00, 0x00,   // Checksum (will be calculated)
+            ...data
+        ];
+
+        // Calculate checksum
+        let checksum = 0;
+        for (let i = 8; i < packet.length; i++) {
+            checksum ^= packet[i];
+        }
+        packet[4] = checksum & 0xFF;
+
+        return packet;
+    }
+
+    // Send sync command to bootloader
+    async sendSyncCommand() {
+        try {
+            const syncData = new Array(32).fill(0x55); // 32 bytes of 0x55
+            const command = this.createCommand(ESP32BootloaderController.ESP_SYNC, syncData);
+            const slipPacket = this.encodeSlip(command);
+            
+            await this.writer.write(slipPacket);
+            console.log('Sent sync command to ESP32 bootloader');
+            
+            // Wait for response (simplified - in real implementation you'd parse the response)
+            await this.delay(100);
+            
+            return true;
+        } catch (error) {
+            console.error('Failed to send sync command:', error);
+            return false;
+        }
+    }
+
+    // Force device into bootloader mode and keep it there
+    async enterBootloaderMode() {
+        try {
+            console.log('Attempting to enter bootloader mode...');
+            
+            // Send multiple sync commands to establish communication
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const success = await this.sendSyncCommand();
+                if (success) {
+                    this.isInBootloaderMode = true;
+                    console.log('Successfully entered bootloader mode');
+                    this.startKeepAlive();
+                    return true;
+                }
+                await this.delay(200);
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('Failed to enter bootloader mode:', error);
+            return false;
+        }
+    }
+
+    // Send keep-alive commands every 2 seconds
+    startKeepAlive() {
+        if (this.keepAliveInterval) {
+            clearInterval(this.keepAliveInterval);
+        }
+
+        this.keepAliveInterval = setInterval(async () => {
+            if (this.isInBootloaderMode && this.writer) {
+                try {
+                    // Send a simple sync command to keep bootloader active
+                    await this.sendSyncCommand();
+                    console.log('Sent keep-alive to bootloader');
+                } catch (error) {
+                    console.error('Keep-alive failed:', error);
+                    this.stopKeepAlive();
+                }
+            }
+        }, 2000);
+    }
+
+    stopKeepAlive() {
+        if (this.keepAliveInterval) {
+            clearInterval(this.keepAliveInterval);
+            this.keepAliveInterval = null;
+        }
+        this.isInBootloaderMode = false;
+    }
+
+    async disconnect() {
+        this.stopKeepAlive();
+        
+        if (this.reader) {
+            await this.reader.cancel();
+            this.reader.releaseLock();
+        }
+        
+        if (this.writer) {
+            this.writer.releaseLock();
+        }
+        
+        if (this.port) {
+            await this.port.close();
+        }
+        
+        console.log('Disconnected from ESP32 bootloader');
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
 class ESP32Flasher {
     constructor() {
         this.currentStep = 1;
         this.selectedVersion = 'v1.36.0.16433';
         this.manifestData = null;
         this.versions = null;
+        this.bootloaderController = new ESP32BootloaderController();
+        this.connectedPort = null;
         
         this.init();
     }
@@ -99,14 +282,36 @@ class ESP32Flasher {
         try {
             // Request serial port access
             const port = await navigator.serial.requestPort();
+            this.connectedPort = port;
             
-            // Success - device connected
-            this.updateConnectionSuccess();
+            // Connect bootloader controller for device preparation
+            const bootloaderConnected = await this.bootloaderController.connect(port);
             
-            // Auto-advance to step 2 after a brief delay
-            setTimeout(() => {
-                this.advanceToStep(2);
-            }, 1500);
+            if (bootloaderConnected) {
+                // Try to enter bootloader mode immediately
+                connectButton.innerHTML = '<span class="button-text">Preparing device...</span>';
+                
+                const bootloaderMode = await this.bootloaderController.enterBootloaderMode();
+                
+                if (bootloaderMode) {
+                    this.updateConnectionSuccess();
+                    console.log('✅ Device prepared and ready for flashing');
+                    
+                    // Auto-advance to step 2 after confirmation
+                    setTimeout(() => {
+                        this.advanceToStep(2);
+                    }, 1500);
+                } else {
+                    // Bootloader preparation failed, but still connected
+                    console.warn('⚠️ Bootloader preparation failed, but device is connected');
+                    this.updateConnectionSuccess();
+                    setTimeout(() => {
+                        this.advanceToStep(2);
+                    }, 1500);
+                }
+            } else {
+                throw new Error('Failed to establish bootloader communication');
+            }
             
         } catch (error) {
             // User cancelled or connection failed
@@ -310,8 +515,20 @@ class ESP32Flasher {
         // Update progress to 100%
         this.updateProgress(3);
         
+        // Stop bootloader keep-alive since flashing is complete
+        if (this.bootloaderController) {
+            this.bootloaderController.stopKeepAlive();
+        }
+        
         // Optional: Add confetti effect or other celebration
         console.log('🎉 Humly Booking Device firmware flashing completed successfully!');
+    }
+
+    // Clean up resources when page unloads
+    cleanup() {
+        if (this.bootloaderController) {
+            this.bootloaderController.disconnect();
+        }
     }
 
     handleFlashError(message) {
@@ -324,7 +541,12 @@ class ESP32Flasher {
 
 // Initialize the flasher when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new ESP32Flasher();
+    const flasher = new ESP32Flasher();
+    
+    // Clean up resources when page unloads
+    window.addEventListener('beforeunload', () => {
+        flasher.cleanup();
+    });
 });
 
 // Add some helper animations

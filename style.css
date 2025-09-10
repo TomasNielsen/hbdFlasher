@@ -322,6 +322,12 @@ body {
     display: inline-block;
 }
 
+.preparation-info {
+    margin-top: 0.5rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
 /* Version selection */
 .version-selection {
     display: flex;
