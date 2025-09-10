@@ -5,13 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.4.6/lib/index.umd.js"></script>
-    <script>
-        console.log('esptool loaded:', typeof esptool);
-        if (typeof esptool !== 'undefined') {
-            console.log('Available esptool properties:', Object.keys(esptool));
-        }
-    </script>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
     <div class="container">
@@ -171,9 +165,16 @@
             </div>
 
             <div class="action-section">
-                <button id="flash-button" class="primary-button large">
-                    🚀 Flash Firmware Now
-                </button>
+                <esp-web-install-button 
+                    id="install-button"
+                    manifest="./manifest.json"
+                    class="install-button">
+                    <button slot="activate" class="primary-button large">
+                        🚀 Flash Firmware Now
+                    </button>
+                    <span slot="unsupported">Your browser is not supported.</span>
+                    <span slot="not-allowed">Installation not allowed.</span>
+                </esp-web-install-button>
             </div>
 
             <div class="flash-progress hidden" id="flash-progress">

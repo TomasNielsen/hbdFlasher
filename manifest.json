@@ -11,27 +11,27 @@
       "improv": false,
       "parts": [
         {
-          "path": "../firmware/v1.36.0.16433/bootloader/bootloader.bin",
+          "path": "./firmware/v1.36.0.16433/bootloader/bootloader.bin",
           "offset": 0
         },
         {
-          "path": "../firmware/v1.36.0.16433/partition_table/partition-table.bin",
+          "path": "./firmware/v1.36.0.16433/partition_table/partition-table.bin",
           "offset": 40960
         },
         {
-          "path": "../firmware/v1.36.0.16433/hbd.bin",
+          "path": "./firmware/v1.36.0.16433/hbd.bin",
           "offset": 65536
         },
         {
-          "path": "../firmware/v1.36.0.16433/ota_data_initial.bin",
+          "path": "./firmware/v1.36.0.16433/ota_data_initial.bin",
           "offset": 9502720
         },
         {
-          "path": "../firmware/v1.36.0.16433/phy_init_data.bin",
+          "path": "./firmware/v1.36.0.16433/phy_init_data.bin",
           "offset": 9510912
         },
         {
-          "path": "../firmware/v1.36.0.16433/assets.bin",
+          "path": "./firmware/v1.36.0.16433/assets.bin",
           "offset": 9519104
         }
       ]
