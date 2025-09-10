@@ -5,9 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <script type="module">
-        import { Transport, ESPLoader } from "https://unpkg.com/esptool-js@0.4.6/lib/index.js";
-        window.esptoolPackage = { Transport, ESPLoader };
+    <script src="https://unpkg.com/pako@2.0.4/dist/pako.min.js"></script>
+    <script src="https://unpkg.com/esptool-js@0.4.6/bundle.js"></script>
+    <script>
+        // Expose the classes from the global esptool bundle
+        window.esptoolPackage = {
+            Transport: window.Transport || window.esptool?.Transport,
+            ESPLoader: window.ESPLoader || window.esptool?.ESPLoader
+        };
+        console.log('esptool-js loaded:', window.esptoolPackage);
     </script>
 </head>
 <body>
