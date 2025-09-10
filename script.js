@@ -296,9 +296,13 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Override with our port
-            navigator.serial.requestPort = () => {
+            // Override with our port and start immediate bootloader communication
+            navigator.serial.requestPort = async () => {
                 console.log('🔄 Using existing port instead of showing port selection dialog');
+                
+                // Start keep-alive communication immediately to prevent 3-second timeout
+                this.startBootloaderKeepAlive();
+                
                 return Promise.resolve(this.connectedPort);
             };
             
@@ -307,6 +311,45 @@ class ESP32Flasher {
         }
     }
 
+    // Start sending keep-alive signals to bootloader to prevent 3-second timeout
+    startBootloaderKeepAlive() {
+        if (this.bootloaderKeepAlive) {
+            clearInterval(this.bootloaderKeepAlive);
+        }
+
+        console.log('🔄 Starting bootloader keep-alive signals...');
+        
+        // Send a simple sync byte every 500ms to keep bootloader active
+        this.bootloaderKeepAlive = setInterval(async () => {
+            try {
+                if (this.connectedPort && this.connectedPort.writable) {
+                    const writer = this.connectedPort.writable.getWriter();
+                    // Send a simple byte to maintain communication
+                    await writer.write(new Uint8Array([0x00]));
+                    writer.releaseLock();
+                    console.log('📡 Sent bootloader keep-alive signal');
+                }
+            } catch (error) {
+                // Stop if port becomes unavailable (ESP Web Tools took over)
+                console.log('✅ Bootloader keep-alive stopped - ESP Web Tools active');
+                this.stopBootloaderKeepAlive();
+            }
+        }, 500); // Every 500ms
+
+        // Auto-stop after 30 seconds as safety measure
+        setTimeout(() => {
+            this.stopBootloaderKeepAlive();
+        }, 30000);
+    }
+
+    // Stop bootloader keep-alive signals
+    stopBootloaderKeepAlive() {
+        if (this.bootloaderKeepAlive) {
+            clearInterval(this.bootloaderKeepAlive);
+            this.bootloaderKeepAlive = null;
+            console.log('🛑 Stopped bootloader keep-alive signals');
+        }
+    }
 
     // Handle quick flash with automated dialog clicking
     async handleQuickFlash() {
@@ -598,6 +641,9 @@ class ESP32Flasher {
             case 'preparing':
             case 'erasing':
             case 'writing':
+                // ESP Web Tools is now active - stop our keep-alive
+                this.stopBootloaderKeepAlive();
+                
                 // Show progress
                 flashProgress.classList.remove('hidden');
                 installButton.style.display = 'none';
