@@ -568,7 +568,7 @@ class ESP32Flasher {
         const command = this.createCommand(0x03, payload);
         await this.writer.write(command);
         
-        const response = await this.readResponse();
+        const response = await this.readResponse(30000);
         return response;
     }
 
@@ -583,7 +583,7 @@ class ESP32Flasher {
         const command = this.createCommand(0x04, data);
         await this.writer.write(command);
         
-        const response = await this.readResponse();
+        const response = await this.readResponse(30000);
         console.log('✅ FLASH_END successful');
         return response;
     }
