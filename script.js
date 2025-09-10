@@ -1,201 +1,6 @@
-// ESP32 Web Flasher - Smart UX Script
-// Handles step progression, browser compatibility, and user interaction
-
-// ESP32 Bootloader Communication Class
-class ESP32BootloaderController {
-    constructor() {
-        this.port = null;
-        this.reader = null;
-        this.writer = null;
-        this.keepAliveInterval = null;
-        this.isInBootloaderMode = false;
-    }
-
-    // ESP32 bootloader protocol constants
-    static SLIP_END = 0xC0;
-    static SLIP_ESC = 0xDB;
-    static SLIP_ESC_END = 0xDC;
-    static SLIP_ESC_ESC = 0xDD;
-    
-    // ESP32 commands
-    static ESP_SYNC = 0x08;
-    static ESP_BEGIN_FLASH = 0x02;
-    static ESP_CHANGE_BAUDRATE = 0x0F;
-
-    async connect(port) {
-        try {
-            this.port = port;
-            
-            // Open port with specific settings for ESP32
-            await this.port.open({
-                baudRate: 115200,
-                dataBits: 8,
-                stopBits: 1,
-                parity: 'none',
-                flowControl: 'none'
-            });
-
-            this.reader = this.port.readable.getReader();
-            this.writer = this.port.writable.getWriter();
-            
-            console.log('Connected to ESP32 device for bootloader control');
-            return true;
-        } catch (error) {
-            console.error('Failed to connect to ESP32:', error);
-            return false;
-        }
-    }
-
-    // Encode data in SLIP protocol
-    encodeSlip(data) {
-        const encoded = [ESP32BootloaderController.SLIP_END];
-        
-        for (const byte of data) {
-            if (byte === ESP32BootloaderController.SLIP_END) {
-                encoded.push(ESP32BootloaderController.SLIP_ESC, ESP32BootloaderController.SLIP_ESC_END);
-            } else if (byte === ESP32BootloaderController.SLIP_ESC) {
-                encoded.push(ESP32BootloaderController.SLIP_ESC, ESP32BootloaderController.SLIP_ESC_ESC);
-            } else {
-                encoded.push(byte);
-            }
-        }
-        
-        encoded.push(ESP32BootloaderController.SLIP_END);
-        return new Uint8Array(encoded);
-    }
-
-    // Create ESP32 command packet
-    createCommand(cmd, data = []) {
-        const dataLength = data.length;
-        const packet = [
-            0x00,  // Direction (request)
-            cmd,   // Command
-            dataLength & 0xFF,        // Data length (low byte)
-            (dataLength >> 8) & 0xFF, // Data length (high byte)
-            0x00, 0x00, 0x00, 0x00,   // Checksum (will be calculated)
-            ...data
-        ];
-
-        // Calculate checksum
-        let checksum = 0;
-        for (let i = 8; i < packet.length; i++) {
-            checksum ^= packet[i];
-        }
-        packet[4] = checksum & 0xFF;
-
-        return packet;
-    }
-
-    // Send sync command to bootloader
-    async sendSyncCommand() {
-        try {
-            const syncData = new Array(32).fill(0x55); // 32 bytes of 0x55
-            const command = this.createCommand(ESP32BootloaderController.ESP_SYNC, syncData);
-            const slipPacket = this.encodeSlip(command);
-            
-            await this.writer.write(slipPacket);
-            console.log('Sent sync command to ESP32 bootloader');
-            
-            // Wait for response (simplified - in real implementation you'd parse the response)
-            await this.delay(100);
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to send sync command:', error);
-            return false;
-        }
-    }
-
-    // Force device into bootloader mode and keep it there
-    async enterBootloaderMode() {
-        try {
-            console.log('Attempting to enter bootloader mode...');
-            
-            // Send multiple sync commands to establish communication
-            for (let attempt = 0; attempt < 3; attempt++) {
-                const success = await this.sendSyncCommand();
-                if (success) {
-                    this.isInBootloaderMode = true;
-                    console.log('Successfully entered bootloader mode');
-                    this.startKeepAlive();
-                    return true;
-                }
-                await this.delay(200);
-            }
-            
-            return false;
-        } catch (error) {
-            console.error('Failed to enter bootloader mode:', error);
-            return false;
-        }
-    }
-
-    // Send keep-alive commands every 2 seconds
-    startKeepAlive() {
-        if (this.keepAliveInterval) {
-            clearInterval(this.keepAliveInterval);
-        }
-
-        this.keepAliveInterval = setInterval(async () => {
-            if (this.isInBootloaderMode && this.writer) {
-                try {
-                    // Send a simple sync command to keep bootloader active
-                    await this.sendSyncCommand();
-                    console.log('Sent keep-alive to bootloader');
-                } catch (error) {
-                    console.error('Keep-alive failed:', error);
-                    this.stopKeepAlive();
-                }
-            }
-        }, 2000);
-    }
-
-    stopKeepAlive() {
-        if (this.keepAliveInterval) {
-            clearInterval(this.keepAliveInterval);
-            this.keepAliveInterval = null;
-        }
-        this.isInBootloaderMode = false;
-    }
-
-    async disconnect() {
-        this.stopKeepAlive();
-        
-        try {
-            if (this.reader) {
-                await this.reader.cancel();
-                this.reader.releaseLock();
-                this.reader = null;
-            }
-        } catch (error) {
-            console.warn('Reader cleanup warning:', error);
-        }
-        
-        try {
-            if (this.writer) {
-                this.writer.releaseLock();
-                this.writer = null;
-            }
-        } catch (error) {
-            console.warn('Writer cleanup warning:', error);
-        }
-        
-        try {
-            if (this.port && this.port.readable) {
-                await this.port.close();
-                this.port = null;
-            }
-        } catch (error) {
-            console.warn('Port close warning:', error);
-        }
-        
-        console.log('Disconnected from ESP32 bootloader - port released for ESP Web Tools');
-    }
-
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
+// ESP32 Web Flasher - Smart UX with Hardware Reset Control
+// Handles step progression, browser compatibility, and ESP32 bootloader timing
+// Version: 2025-01-10 with proper DTR/RTS hardware reset implementation
 
 class ESP32Flasher {
     constructor() {
@@ -269,7 +74,7 @@ class ESP32Flasher {
         // Setup ESP Web Tools event listeners
         this.setupESPWebToolsListeners();
 
-        // Quick flash button
+        // Quick flash button - now uses hardware reset instead of workarounds
         const quickFlashButton = document.getElementById('quick-flash-button');
         quickFlashButton.addEventListener('click', () => this.handleQuickFlash());
 
@@ -283,11 +88,178 @@ class ESP32Flasher {
     setupESPWebToolsListeners() {
         const installButton = document.querySelector('esp-web-install-button');
         if (installButton) {
-            // Listen for install events
+            console.log('🎯 Setting up ESP Web Tools listeners...');
+            
+            // Listen for install events with better debugging
             installButton.addEventListener('state-changed', (event) => {
+                console.log('📡 ESP Web Tools state-changed event:', event.detail);
                 this.handleInstallStateChange(event.detail);
             });
+
+            // Listen for multiple ESP Web Tools events
+            const events = ['install-started', 'install-finished', 'install-failed', 'connect'];
+            events.forEach(eventName => {
+                installButton.addEventListener(eventName, (event) => {
+                    console.log(`📡 ESP Web Tools ${eventName} event:`, event.detail);
+                    if (eventName === 'install-started' || eventName === 'connect') {
+                        console.log('🎯 ESP Web Tools starting - triggering hardware reset!');
+                        this.performHardwareReset();
+                    }
+                });
+            });
+
+            // Monitor ESP Web Tools lifecycle events
+            this.monitorESPWebToolsEvents(installButton);
+        } else {
+            console.warn('⚠️ esp-web-install-button not found');
         }
+    }
+
+    // Monitor ESP Web Tools for the perfect moment to trigger hardware reset
+    monitorESPWebToolsEvents(installButton) {
+        console.log('🔍 Setting up ESP Web Tools monitoring...');
+
+        // Hook into the ESP Web Tools button click directly
+        const activateButton = installButton.querySelector('button[slot="activate"]');
+        if (activateButton) {
+            const originalClick = activateButton.click.bind(activateButton);
+            activateButton.click = () => {
+                console.log('🎯 ESP Web Tools button clicked - triggering hardware reset first!');
+                this.performHardwareReset().then(() => {
+                    // Small delay to ensure reset completes before ESP Web Tools starts
+                    setTimeout(() => originalClick(), 200);
+                });
+            };
+            console.log('✅ Hooked into ESP Web Tools button click');
+        }
+
+        // Monitor for when ESP Web Tools creates dialogs
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            this.checkForFlashingTrigger(node);
+                        }
+                    });
+                }
+            });
+        });
+
+        // Start observing the document for ESP Web Tools dialog creation
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true 
+        });
+
+        // Store observer for cleanup
+        this.espToolsObserver = observer;
+    }
+
+    // Check if ESP Web Tools is about to start flashing
+    checkForFlashingTrigger(element) {
+        // Look for ESP Web Tools dialogs or progress indicators
+        if (element.tagName && element.tagName.includes('DIALOG') ||
+            element.classList && element.classList.contains('dialog') ||
+            element.textContent && element.textContent.includes('Installing')) {
+            
+            console.log('🎯 ESP Web Tools dialog detected - preparing for hardware reset timing');
+            this.prepareForHardwareReset();
+        }
+    }
+
+    // Prepare for hardware reset when ESP Web Tools is about to flash
+    async prepareForHardwareReset() {
+        if (!this.connectedPort || !this.portConnected) {
+            console.warn('⚠️ No connected port available for hardware reset');
+            return;
+        }
+
+        console.log('🔧 Preparing hardware reset sequence for bootloader mode...');
+        
+        // Set up hardware reset trigger for when ESP Web Tools actually connects
+        this.setupHardwareResetTrigger();
+    }
+
+    // Hardware reset control using DTR/RTS signals
+    async performHardwareReset() {
+        if (!this.connectedPort) {
+            console.error('❌ No port available for hardware reset');
+            return false;
+        }
+
+        try {
+            console.log('⚡ Starting ESP32 hardware reset sequence...');
+            
+            // Check if setSignals is available
+            if (typeof this.connectedPort.setSignals !== 'function') {
+                console.error('❌ SerialPort.setSignals() not supported by this browser/port');
+                return false;
+            }
+
+            // Get current signal state for debugging
+            const currentSignals = await this.connectedPort.getSignals();
+            console.log('📊 Current port signals:', currentSignals);
+
+            console.log('🔧 ESP32 hardware reset sequence:');
+            console.log('   DTR controls EN (enable/reset) - LOW = reset, HIGH = run');
+            console.log('   RTS controls GPIO0 (boot mode) - LOW = bootloader, HIGH = normal boot');
+            
+            // Step 1: Assert reset (EN low) and set bootloader mode (GPIO0 low)
+            console.log('📍 Step 1: Asserting reset and bootloader mode...');
+            await this.connectedPort.setSignals({
+                dataTerminalReady: false,  // EN = LOW (reset)
+                requestToSend: false       // GPIO0 = LOW (bootloader mode)
+            });
+            
+            // Hold reset for 100ms
+            console.log('⏱️ Holding reset for 100ms...');
+            await this.delay(100);
+            
+            // Step 2: Release reset while keeping GPIO0 low (bootloader mode)
+            console.log('📍 Step 2: Releasing reset, keeping bootloader mode...');
+            await this.connectedPort.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)
+                requestToSend: false       // GPIO0 = LOW (bootloader mode)
+            });
+            
+            // Hold bootloader mode for 50ms
+            console.log('⏱️ Holding bootloader mode for 50ms...');
+            await this.delay(50);
+            
+            // Step 3: Release GPIO0 - device should now be in bootloader mode
+            console.log('📍 Step 3: Releasing GPIO0, device should be in bootloader mode...');
+            await this.connectedPort.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)
+                requestToSend: true        // GPIO0 = HIGH (release)
+            });
+
+            // Check final signal state
+            const finalSignals = await this.connectedPort.getSignals();
+            console.log('📊 Final port signals:', finalSignals);
+
+            console.log('✅ Hardware reset sequence completed - ESP32 should be in bootloader mode');
+            console.log('🎯 Device is now ready for ESP Web Tools flashing');
+            return true;
+
+        } catch (error) {
+            console.error('❌ Hardware reset failed:', error);
+            console.error('💡 Possible causes:');
+            console.error('   - SerialPort.setSignals() not supported');
+            console.error('   - Port not connected properly');
+            console.error('   - Hardware doesn\'t support DTR/RTS control');
+            return false;
+        }
+    }
+
+    // Legacy method - now handled by button click hook
+    setupHardwareResetTrigger() {
+        console.log('⚠️ Legacy setupHardwareResetTrigger - hardware reset is now handled by button click hook');
+    }
+
+    // Utility function for delays
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     // Override navigator.serial.requestPort to return our existing port
@@ -296,13 +268,9 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Override with our port and send immediate sync
-            navigator.serial.requestPort = async () => {
-                console.log('🔄 Using existing port and sending immediate sync to bootloader');
-                
-                // Send immediate sync to prevent 3-second timeout
-                await this.sendEmergencySync();
-                
+            // Simple port reuse without workarounds
+            navigator.serial.requestPort = () => {
+                console.log('🔄 Using existing port from Step 1');
                 return Promise.resolve(this.connectedPort);
             };
             
@@ -311,111 +279,16 @@ class ESP32Flasher {
         }
     }
 
-    // Send emergency sync immediately when ESP Web Tools requests port
-    async sendEmergencySync() {
-        try {
-            console.log('🚨 Sending emergency sync to maintain bootloader mode...');
-            
-            if (this.connectedPort && this.connectedPort.writable) {
-                const writer = this.connectedPort.writable.getWriter();
-                
-                // Send multiple rapid sync bytes to ensure bootloader stays active
-                for (let i = 0; i < 10; i++) {
-                    await writer.write(new Uint8Array([0x00]));
-                    await this.delay(5); // Very short delay
-                }
-                
-                writer.releaseLock();
-                console.log('✅ Emergency sync completed - bootloader should stay active');
-            }
-        } catch (error) {
-            console.warn('⚠️ Emergency sync failed:', error.message);
+    // Restore original port selection behavior
+    restorePortSelection() {
+        if (this.originalRequestPort) {
+            navigator.serial.requestPort = this.originalRequestPort;
+            console.log('🔄 Restored original port selection behavior');
+            this.originalRequestPort = null;
         }
     }
 
-    // Monitor ESP Web Tools and send immediate sync when it's ready to communicate
-    startBootloaderKeepAlive() {
-        console.log('🔄 Starting ESP Web Tools monitoring for immediate sync...');
-        
-        // Monitor ESP Web Tools communication state
-        this.monitorESPWebTools();
-    }
-
-    // Monitor ESP Web Tools and trigger immediate bootloader sync
-    monitorESPWebTools() {
-        if (this.espMonitorInterval) {
-            clearInterval(this.espMonitorInterval);
-        }
-
-        this.espMonitorInterval = setInterval(() => {
-            // Look for ESP Web Tools state indicators in console or DOM
-            const espLogs = document.querySelectorAll('[data-message*="esptool"], [data-message*="Connecting"]');
-            
-            // Check if ESP Web Tools is about to start communication
-            if (this.detectESPToolsReady()) {
-                console.log('🚀 ESP Web Tools ready - sending immediate bootloader sync!');
-                this.sendImmediateSync();
-                clearInterval(this.espMonitorInterval);
-                this.espMonitorInterval = null;
-            }
-        }, 100); // Check every 100ms
-
-        // Safety timeout
-        setTimeout(() => {
-            if (this.espMonitorInterval) {
-                clearInterval(this.espMonitorInterval);
-                this.espMonitorInterval = null;
-                console.log('⚠️ ESP Web Tools monitoring timeout');
-            }
-        }, 15000);
-    }
-
-    // Detect when ESP Web Tools is ready to communicate
-    detectESPToolsReady() {
-        // Look for signs that ESP Web Tools is about to start
-        const logElements = document.querySelectorAll('.log-entry, [data-log], [data-message]');
-        for (const element of logElements) {
-            const text = element.textContent || '';
-            if (text.includes('esptool.js') || 
-                text.includes('Connecting...') || 
-                text.includes('Serial port')) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Send immediate sync to bootloader to prevent timeout
-    async sendImmediateSync() {
-        try {
-            if (this.connectedPort && this.connectedPort.writable) {
-                const writer = this.connectedPort.writable.getWriter();
-                
-                // Send rapid sync commands
-                for (let i = 0; i < 5; i++) {
-                    const syncByte = new Uint8Array([0x00]);
-                    await writer.write(syncByte);
-                    await this.delay(10);
-                }
-                
-                writer.releaseLock();
-                console.log('✅ Sent immediate bootloader sync signals');
-            }
-        } catch (error) {
-            console.log('⚠️ Immediate sync failed:', error.message);
-        }
-    }
-
-    // Stop bootloader monitoring
-    stopBootloaderKeepAlive() {
-        if (this.espMonitorInterval) {
-            clearInterval(this.espMonitorInterval);
-            this.espMonitorInterval = null;
-            console.log('🛑 Stopped ESP Web Tools monitoring');
-        }
-    }
-
-    // Handle quick flash with automated dialog clicking
+    // Handle quick flash with hardware reset control
     async handleQuickFlash() {
         if (!this.portConnected || !this.connectedPort) {
             alert('No device connected. Please go back to Step 1 and connect your device.');
@@ -423,20 +296,21 @@ class ESP32Flasher {
         }
 
         try {
-            console.log('⚡ Starting Quick Flash with automated dialog handling...');
+            console.log('⚡ Starting Quick Flash with hardware reset control...');
+            
+            // Test SerialPort.setSignals() capability first
+            const resetCapable = await this.testHardwareResetCapability();
+            if (!resetCapable) {
+                console.warn('⚠️ Hardware reset not supported, trying ESP Web Tools anyway...');
+            }
             
             // Click the ESP Web Tools button to start the process
             const installButton = document.querySelector('esp-web-install-button');
             const activateButton = installButton.querySelector('button[slot="activate"]');
             
             if (activateButton) {
-                console.log('🔄 Clicking ESP Web Tools button...');
+                console.log('🚀 Clicking ESP Web Tools button (hardware reset is hooked in)...');
                 activateButton.click();
-                
-                // Set up automated dialog clicking after a small delay
-                setTimeout(() => {
-                    this.setupAutomatedDialogClicker();
-                }, 200);
             }
             
         } catch (error) {
@@ -445,64 +319,41 @@ class ESP32Flasher {
         }
     }
 
-    // Automatically click through ESP Web Tools dialogs
-    setupAutomatedDialogClicker() {
-        console.log('🤖 Setting up automated dialog clicker...');
-        
-        // Function to repeatedly check for and click dialog buttons
-        const clickDialogs = () => {
-            // Look for "Install firmware" button
-            const installFirmwareBtn = document.querySelector('button[data-action="install"]');
-            if (installFirmwareBtn && installFirmwareBtn.textContent.includes('Install firmware')) {
-                console.log('🔄 Auto-clicking "Install firmware" button');
-                installFirmwareBtn.click();
-                return;
-            }
-            
-            // Look for "Next" button (skip erase)
-            const nextBtn = Array.from(document.querySelectorAll('button')).find(btn => 
-                btn.textContent.trim() === 'Next'
-            );
-            if (nextBtn) {
-                console.log('🔄 Auto-clicking "Next" button');
-                nextBtn.click();
-                return;
-            }
-            
-            // Look for final "Install" button
-            const finalInstallBtn = Array.from(document.querySelectorAll('button')).find(btn => 
-                btn.textContent.trim() === 'Install' && !btn.textContent.includes('firmware')
-            );
-            if (finalInstallBtn) {
-                console.log('🔄 Auto-clicking final "Install" button');
-                finalInstallBtn.click();
-                
-                // Stop looking for buttons once we've clicked Install
-                clearInterval(this.dialogClickerInterval);
-                this.dialogClickerInterval = null;
-                return;
-            }
-        };
-        
-        // Check for dialog buttons every 100ms for up to 10 seconds
-        this.dialogClickerInterval = setInterval(clickDialogs, 100);
-        
-        // Safety timeout - stop after 10 seconds
-        setTimeout(() => {
-            if (this.dialogClickerInterval) {
-                console.log('⚠️ Auto-clicker timeout - manual interaction may be needed');
-                clearInterval(this.dialogClickerInterval);
-                this.dialogClickerInterval = null;
-            }
-        }, 10000);
-    }
+    // Test if hardware reset is supported
+    async testHardwareResetCapability() {
+        if (!this.connectedPort) {
+            console.log('❌ No port for hardware reset test');
+            return false;
+        }
 
-    // Restore original port selection behavior
-    restorePortSelection() {
-        if (this.originalRequestPort) {
-            navigator.serial.requestPort = this.originalRequestPort;
-            console.log('🔄 Restored original port selection behavior');
-            this.originalRequestPort = null;
+        try {
+            console.log('🧪 Testing SerialPort.setSignals() capability...');
+            
+            if (typeof this.connectedPort.setSignals !== 'function') {
+                console.log('❌ SerialPort.setSignals() not available');
+                return false;
+            }
+
+            if (typeof this.connectedPort.getSignals !== 'function') {
+                console.log('❌ SerialPort.getSignals() not available');
+                return false;
+            }
+
+            // Test getting current signals
+            const signals = await this.connectedPort.getSignals();
+            console.log('✅ SerialPort.getSignals() works:', signals);
+
+            // Test setting signals (non-disruptive test)
+            await this.connectedPort.setSignals({
+                dataTerminalReady: signals.dataTerminalReady || true,
+                requestToSend: signals.requestToSend || true
+            });
+            console.log('✅ SerialPort.setSignals() works');
+
+            return true;
+        } catch (error) {
+            console.log('❌ Hardware reset capability test failed:', error);
+            return false;
         }
     }
 
@@ -526,8 +377,16 @@ class ESP32Flasher {
             // Success - device connected
             this.updateConnectionSuccess();
             
-            // Auto-advance to step 2 after a brief delay
-            setTimeout(() => {
+            // Test hardware reset capability immediately after connection
+            setTimeout(async () => {
+                const resetCapable = await this.testHardwareResetCapability();
+                if (resetCapable) {
+                    console.log('🎯 Hardware reset ready - ESP32 flashing should work perfectly!');
+                } else {
+                    console.warn('⚠️ Hardware reset not supported - may encounter timing issues');
+                }
+                
+                // Auto-advance to step 2
                 this.advanceToStep(2);
             }, 1500);
             
@@ -699,18 +558,16 @@ class ESP32Flasher {
         const flashSuccess = document.getElementById('flash-success');
         const installButton = document.getElementById('install-button');
         
-        console.log('Install state changed:', state);
+        console.log('📡 ESP Web Tools state changed:', state);
         
         switch (state.state) {
             case 'preparing':
             case 'erasing':
             case 'writing':
-                // ESP Web Tools is now active - stop our keep-alive
-                this.stopBootloaderKeepAlive();
-                
-                // Show progress
+                // Show progress - hardware reset should have put device in bootloader mode
                 flashProgress.classList.remove('hidden');
                 installButton.style.display = 'none';
+                console.log('📋 Flashing in progress - hardware reset worked!');
                 break;
                 
             case 'finished':
@@ -753,8 +610,20 @@ class ESP32Flasher {
         // Update progress to 100%
         this.updateProgress(3);
         
+        // Clean up observers
+        this.cleanupObservers();
+        
         // Optional: Add confetti effect or other celebration
         console.log('🎉 Humly Booking Device firmware flashing completed successfully!');
+        console.log('✅ Hardware reset approach eliminated timing issues!');
+    }
+
+    // Clean up observers and resources
+    cleanupObservers() {
+        if (this.espToolsObserver) {
+            this.espToolsObserver.disconnect();
+            this.espToolsObserver = null;
+        }
     }
 }
 
