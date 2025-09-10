@@ -293,12 +293,23 @@ class ESP32Flasher {
             flashProgress.classList.remove('hidden');
             
             console.log('🚀 Starting direct firmware flash with esptool-js...');
+            console.log('Available globals:', { ESPLoader, Transport, esptool: window.esptool });
             
             // Create transport for the existing port
-            const transport = new Transport(this.connectedPort);
+            const TransportClass = Transport || window.esptool?.Transport;
+            const ESPLoaderClass = ESPLoader || window.esptool?.ESPLoader;
+            
+            if (!TransportClass) {
+                throw new Error('Transport class not available');
+            }
+            if (!ESPLoaderClass) {
+                throw new Error('ESPLoader class not available');
+            }
+            
+            const transport = new TransportClass(this.connectedPort);
             
             // Create ESPLoader instance  
-            const loader = new ESPLoader({
+            const loader = new ESPLoaderClass({
                 transport: transport,
                 baudrate: 115200
             });

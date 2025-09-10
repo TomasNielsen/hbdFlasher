@@ -6,9 +6,11 @@
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
     <script type="module">
-        import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js/lib/index.js';
-        window.ESPLoader = ESPLoader;
-        window.Transport = Transport;
+        import * as esptool from 'https://unpkg.com/esptool-js/lib/index.js';
+        console.log('Available esptool exports:', Object.keys(esptool));
+        window.esptool = esptool;
+        window.ESPLoader = esptool.ESPLoader;
+        window.Transport = esptool.Transport;
     </script>
 </head>
 <body>
