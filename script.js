@@ -451,7 +451,7 @@ class ESP32Flasher {
             await this.writer.write(syncCommand);
             
             try {
-                const response = await this.readResponse(1000); // 1 second timeout
+                const response = await this.readResponse(30000); // 30 second timeout for bootloader readiness
                 if (response) {
                     console.log('✅ ESP32 SYNC successful');
                     return true;
