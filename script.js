@@ -179,10 +179,32 @@ class ESP32Flasher {
                 }
             });
             
-            // Connect with default_reset (matches --before default_reset)
-            console.log('🔗 Connecting to ESP32 with default_reset...');
-            const chip = await this.espLoader.connect('default_reset');
-            console.log('✅ Connected to chip:', chip);
+            // Your Windows flasher uses --chip esp32s3, let's set that explicitly
+            console.log('⚙️ Configuring for ESP32-S3 chip type...');
+            
+            // Try different connection approaches to match Windows flasher
+            console.log('🔗 Connecting to ESP32...');
+            let chip;
+            
+            // First try: ESP32-S3 specific connection
+            try {
+                console.log('🔍 Attempting ESP32-S3 connection...');
+                chip = await this.espLoader.connect();
+                console.log('✅ Connected successfully:', chip);
+            } catch (error) {
+                console.log('⚠️ Standard connection failed:', error.message);
+                
+                // Second try: with specific reset sequence
+                try {
+                    console.log('🔍 Attempting connection with manual reset...');
+                    chip = await this.espLoader.connect('no_reset');
+                    console.log('✅ Connected with no_reset:', chip);
+                } catch (error2) {
+                    console.log('⚠️ no_reset connection failed:', error2.message);
+                    throw new Error(`Failed to connect to ESP32: ${error.message}`);
+                }
+            }
+            
             console.log('Chip info:', {
                 chipName: chip,
                 features: this.espLoader.getChipFeatures && this.espLoader.getChipFeatures(),
