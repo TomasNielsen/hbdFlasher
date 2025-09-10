@@ -269,6 +269,10 @@ class ESP32Flasher {
         // Setup ESP Web Tools event listeners
         this.setupESPWebToolsListeners();
 
+        // Quick flash button
+        const quickFlashButton = document.getElementById('quick-flash-button');
+        quickFlashButton.addEventListener('click', () => this.handleQuickFlash());
+
         // Version card selection
         const versionCards = document.querySelectorAll('.version-card');
         versionCards.forEach(card => {
@@ -292,15 +296,139 @@ class ESP32Flasher {
             // Store the original requestPort function
             const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
             
-            // Override with our port
-            navigator.serial.requestPort = () => {
+            // Override with our port and prepare bootloader
+            navigator.serial.requestPort = async () => {
                 console.log('🔄 Using existing port instead of showing port selection dialog');
+                
+                // Force ESP32 into bootloader mode before returning port
+                await this.prepareESP32Bootloader();
+                
                 return Promise.resolve(this.connectedPort);
             };
             
             // Store original function for cleanup
             this.originalRequestPort = originalRequestPort;
         }
+    }
+
+    // Force ESP32 into bootloader mode and keep it there
+    async prepareESP32Bootloader() {
+        if (!this.connectedPort) return;
+
+        try {
+            console.log('🔄 Preparing ESP32 for bootloader mode...');
+            
+            // Open the port if not already open
+            if (!this.connectedPort.readable) {
+                await this.connectedPort.open({
+                    baudRate: 115200,
+                    dataBits: 8,
+                    stopBits: 1,
+                    parity: 'none',
+                    flowControl: 'none'
+                });
+            }
+
+            // Get reader and writer
+            const reader = this.connectedPort.readable.getReader();
+            const writer = this.connectedPort.writable.getWriter();
+
+            // Send break condition to enter bootloader
+            await writer.write(new Uint8Array([0x00])); // Send break/null byte
+            await this.delay(100);
+            
+            console.log('✅ ESP32 should now be in bootloader mode');
+            
+            // Clean up
+            reader.releaseLock();
+            writer.releaseLock();
+            
+        } catch (error) {
+            console.warn('⚠️ Bootloader preparation failed (ESP Web Tools will handle):', error);
+        }
+    }
+
+    // Handle quick flash with automated dialog clicking
+    async handleQuickFlash() {
+        if (!this.portConnected || !this.connectedPort) {
+            alert('No device connected. Please go back to Step 1 and connect your device.');
+            return;
+        }
+
+        try {
+            console.log('⚡ Starting Quick Flash with automated dialog handling...');
+            
+            // First prepare ESP32 for bootloader mode
+            await this.prepareESP32Bootloader();
+            
+            // Click the ESP Web Tools button to start the process
+            const installButton = document.querySelector('esp-web-install-button');
+            const activateButton = installButton.querySelector('button[slot="activate"]');
+            
+            if (activateButton) {
+                console.log('🔄 Clicking ESP Web Tools button...');
+                activateButton.click();
+                
+                // Set up automated dialog clicking
+                this.setupAutomatedDialogClicker();
+            }
+            
+        } catch (error) {
+            console.error('❌ Quick Flash failed:', error);
+            alert(`Quick Flash failed: ${error.message}. Try the manual flash button instead.`);
+        }
+    }
+
+    // Automatically click through ESP Web Tools dialogs
+    setupAutomatedDialogClicker() {
+        console.log('🤖 Setting up automated dialog clicker...');
+        
+        // Function to repeatedly check for and click dialog buttons
+        const clickDialogs = () => {
+            // Look for "Install firmware" button
+            const installFirmwareBtn = document.querySelector('button[data-action="install"]');
+            if (installFirmwareBtn && installFirmwareBtn.textContent.includes('Install firmware')) {
+                console.log('🔄 Auto-clicking "Install firmware" button');
+                installFirmwareBtn.click();
+                return;
+            }
+            
+            // Look for "Next" button (skip erase)
+            const nextBtn = Array.from(document.querySelectorAll('button')).find(btn => 
+                btn.textContent.trim() === 'Next'
+            );
+            if (nextBtn) {
+                console.log('🔄 Auto-clicking "Next" button');
+                nextBtn.click();
+                return;
+            }
+            
+            // Look for final "Install" button
+            const finalInstallBtn = Array.from(document.querySelectorAll('button')).find(btn => 
+                btn.textContent.trim() === 'Install' && !btn.textContent.includes('firmware')
+            );
+            if (finalInstallBtn) {
+                console.log('🔄 Auto-clicking final "Install" button');
+                finalInstallBtn.click();
+                
+                // Stop looking for buttons once we've clicked Install
+                clearInterval(this.dialogClickerInterval);
+                this.dialogClickerInterval = null;
+                return;
+            }
+        };
+        
+        // Check for dialog buttons every 100ms for up to 10 seconds
+        this.dialogClickerInterval = setInterval(clickDialogs, 100);
+        
+        // Safety timeout - stop after 10 seconds
+        setTimeout(() => {
+            if (this.dialogClickerInterval) {
+                console.log('⚠️ Auto-clicker timeout - manual interaction may be needed');
+                clearInterval(this.dialogClickerInterval);
+                this.dialogClickerInterval = null;
+            }
+        }, 10000);
     }
 
     // Restore original port selection behavior
