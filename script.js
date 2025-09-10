@@ -181,6 +181,10 @@ class ESP32Flasher {
             // Force ESP32-S3 chip type to match Windows flasher --chip esp32s3
             console.log('⚙️ Forcing ESP32-S3 chip type to skip auto-detection...');
             
+            // Perform hardware reset sequence before connection (--before default_reset)
+            console.log('🔄 Performing hardware reset sequence...');
+            await this.performHardwareReset();
+            
             // Connect to ESP32-S3 without auto-detection
             console.log('🔗 Connecting to ESP32-S3...');
             console.log('🔍 Attempting ESP32-S3 specific connection...');
@@ -310,25 +314,70 @@ class ESP32Flasher {
         return fileArray;
     }
 
+    async performHardwareReset() {
+        console.log('⚡ Starting ESP32-S3 hardware reset sequence...');
+        
+        try {
+            // Get the raw serial port from transport
+            const port = this.connectedPort;
+            
+            // Check if port supports signal control
+            if (typeof port.setSignals !== 'function') {
+                console.log('⚠️ Port does not support setSignals - skipping hardware reset');
+                return;
+            }
+            
+            console.log('🔧 ESP32-S3 reset sequence (matching Windows flasher):');
+            console.log('   DTR controls EN (enable/reset) - LOW = reset, HIGH = run');
+            console.log('   RTS controls GPIO0 (boot mode) - LOW = bootloader, HIGH = normal');
+            
+            // Step 1: Assert reset (EN low) and set bootloader mode (GPIO0 low)
+            console.log('📍 Step 1: Asserting reset and bootloader mode...');
+            await port.setSignals({
+                dataTerminalReady: false,  // EN = LOW (reset)
+                requestToSend: false       // GPIO0 = LOW (bootloader mode)
+            });
+            
+            await this.delay(100); // Hold reset for 100ms
+            
+            // Step 2: Release reset while keeping GPIO0 low (enter bootloader)
+            console.log('📍 Step 2: Releasing reset, keeping bootloader mode...');
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)
+                requestToSend: false       // GPIO0 = LOW (bootloader mode)
+            });
+            
+            await this.delay(50); // Hold bootloader mode
+            
+            // Step 3: Release GPIO0 - device should be in bootloader mode
+            console.log('📍 Step 3: Releasing GPIO0, device in bootloader mode...');
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)
+                requestToSend: true        // GPIO0 = HIGH (release)
+            });
+            
+            await this.delay(100); // Let device stabilize
+            
+            console.log('✅ Hardware reset completed - device should be in bootloader mode');
+            
+        } catch (error) {
+            console.log('⚠️ Hardware reset failed:', error.message);
+            console.log('   Device may not support DTR/RTS control');
+        }
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async attemptDeviceRecovery() {
         console.log('🔧 Attempting device recovery...');
         
         try {
-            if (this.espLoader) {
-                console.log('🔄 Trying soft reset...');
-                await this.espLoader.softReset();
-            }
+            console.log('🔄 Trying hardware reset recovery...');
+            await this.performHardwareReset();
         } catch (e) {
-            console.log('⚠️ Soft reset failed:', e.message);
-        }
-        
-        try {
-            if (this.espLoader) {
-                console.log('🔄 Trying hard reset...');
-                await this.espLoader.hardReset();
-            }
-        } catch (e) {
-            console.log('⚠️ Hard reset failed:', e.message);
+            console.log('⚠️ Hardware reset recovery failed:', e.message);
         }
         
         console.log('🔧 Device recovery attempt completed');
