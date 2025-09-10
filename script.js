@@ -219,9 +219,6 @@ class ESP32Flasher {
         // Initialize event listeners
         this.setupEventListeners();
         
-        // Setup ESP Web Tools event listeners
-        this.setupESPWebToolsListeners();
-        
         console.log('Humly Booking Device Flasher initialized');
     }
 
@@ -269,6 +266,10 @@ class ESP32Flasher {
         const continueButton = document.getElementById('continue-button');
         continueButton.addEventListener('click', () => this.proceedToFlashing());
 
+        // Flash button
+        const flashButton = document.getElementById('flash-button');
+        flashButton.addEventListener('click', () => this.handleFlash());
+
         // Version card selection
         const versionCards = document.querySelectorAll('.version-card');
         versionCards.forEach(card => {
@@ -276,40 +277,112 @@ class ESP32Flasher {
         });
     }
 
-    setupESPWebToolsListeners() {
-        const installButton = document.querySelector('esp-web-install-button');
-        if (installButton) {
-            // Listen for install events
-            installButton.addEventListener('state-changed', (event) => {
-                this.handleInstallStateChange(event.detail);
-            });
+    // Handle direct firmware flashing with esptool-js
+    async handleFlash() {
+        const flashButton = document.getElementById('flash-button');
+        const flashProgress = document.getElementById('flash-progress');
+        
+        if (!this.portConnected || !this.connectedPort) {
+            alert('No device connected. Please go back to Step 1 and connect your device.');
+            return;
+        }
+
+        try {
+            // Show progress
+            flashButton.style.display = 'none';
+            flashProgress.classList.remove('hidden');
+            
+            console.log('🚀 Starting direct firmware flash with esptool-js...');
+            
+            // Create transport for the existing port
+            const transport = new esptool.Transport(this.connectedPort);
+            
+            // Create ESPLoader instance
+            const loader = new esptool.ESPLoader(transport, 115200);
+            
+            // Connect and detect chip
+            await loader.main_fn();
+            console.log('✅ Connected to ESP32 chip');
+            
+            // Load firmware files for the selected version
+            const firmwareFiles = await this.loadFirmwareFiles(this.selectedVersion);
+            
+            // Flash firmware
+            await loader.flash_images(
+                firmwareFiles,
+                'flash',  // mode
+                true,     // compress
+                null,     // leave_running
+                this.updateFlashProgress.bind(this)  // progress callback
+            );
+            
+            console.log('✅ Firmware flashing completed successfully!');
+            this.handleFlashSuccess();
+            
+        } catch (error) {
+            console.error('❌ Flashing failed:', error);
+            this.handleFlashError(error.message);
         }
     }
 
-    // Override navigator.serial.requestPort to return our existing port
-    setupPortInterception() {
-        if (this.portConnected && this.connectedPort) {
-            // Store the original requestPort function
-            const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
-            
-            // Override with our port
-            navigator.serial.requestPort = () => {
-                console.log('🔄 Using existing port instead of showing port selection dialog');
-                return Promise.resolve(this.connectedPort);
-            };
-            
-            // Store original function for cleanup
-            this.originalRequestPort = originalRequestPort;
+    // Load firmware binary files for flashing
+    async loadFirmwareFiles(version) {
+        const files = [
+            { path: `../firmware/${version}/bootloader/bootloader.bin`, address: 0 },
+            { path: `../firmware/${version}/partition_table/partition-table.bin`, address: 40960 },
+            { path: `../firmware/${version}/hbd.bin`, address: 65536 },
+            { path: `../firmware/${version}/ota_data_initial.bin`, address: 9502720 },
+            { path: `../firmware/${version}/phy_init_data.bin`, address: 9510912 },
+            { path: `../firmware/${version}/assets.bin`, address: 9519104 }
+        ];
+
+        const firmwareFiles = [];
+        
+        for (const file of files) {
+            try {
+                console.log(`📥 Loading ${file.path}...`);
+                const response = await fetch(file.path);
+                if (!response.ok) {
+                    throw new Error(`Failed to load ${file.path}: ${response.statusText}`);
+                }
+                const data = new Uint8Array(await response.arrayBuffer());
+                firmwareFiles.push({
+                    data: data,
+                    address: file.address
+                });
+                console.log(`✅ Loaded ${file.path} (${data.length} bytes) at 0x${file.address.toString(16)}`);
+            } catch (error) {
+                console.error(`❌ Failed to load ${file.path}:`, error);
+                throw error;
+            }
+        }
+        
+        return firmwareFiles;
+    }
+
+    // Update flash progress
+    updateFlashProgress(fileIndex, written, total) {
+        const percentage = Math.round((written / total) * 100);
+        console.log(`📊 Flashing progress: ${percentage}% (${written}/${total} bytes)`);
+        
+        // Update progress display if needed
+        const progressInfo = document.querySelector('.progress-info h3');
+        if (progressInfo) {
+            progressInfo.textContent = `Flashing firmware... ${percentage}%`;
         }
     }
 
-    // Restore original port selection behavior
-    restorePortSelection() {
-        if (this.originalRequestPort) {
-            navigator.serial.requestPort = this.originalRequestPort;
-            console.log('🔄 Restored original port selection behavior');
-            this.originalRequestPort = null;
-        }
+    // Handle successful flashing
+    handleFlashSuccess() {
+        const flashProgress = document.getElementById('flash-progress');
+        const flashSuccess = document.getElementById('flash-success');
+        
+        // Hide progress, show success
+        flashProgress.classList.add('hidden');
+        flashSuccess.classList.remove('hidden');
+        
+        // Celebrate!
+        this.celebrateSuccess();
     }
 
     async handleConnect() {
@@ -450,9 +523,6 @@ class ESP32Flasher {
             document.getElementById('selected-version').textContent = versionInfo.name;
         }
         
-        // Setup port interception to avoid redundant port selection
-        this.setupPortInterception();
-        
         // Advance to step 3
         this.advanceToStep(3);
     }
@@ -499,45 +569,18 @@ class ESP32Flasher {
         });
     }
 
-    handleInstallStateChange(state) {
+    handleFlashError(message) {
         const flashProgress = document.getElementById('flash-progress');
-        const flashSuccess = document.getElementById('flash-success');
-        const installButton = document.getElementById('install-button');
+        const flashButton = document.getElementById('flash-button');
         
-        console.log('Install state changed:', state);
+        console.error('Flash error:', message);
         
-        switch (state.state) {
-            case 'preparing':
-            case 'erasing':
-            case 'writing':
-                // Show progress
-                flashProgress.classList.remove('hidden');
-                installButton.style.display = 'none';
-                break;
-                
-            case 'finished':
-                // Show success
-                flashProgress.classList.add('hidden');
-                flashSuccess.classList.remove('hidden');
-                
-                // Restore original port selection function
-                this.restorePortSelection();
-                
-                // Celebrate!
-                this.celebrateSuccess();
-                break;
-                
-            case 'error':
-                // Handle error
-                flashProgress.classList.add('hidden');
-                installButton.style.display = 'flex';
-                
-                // Restore original port selection function
-                this.restorePortSelection();
-                
-                this.handleFlashError(state.message);
-                break;
-        }
+        // Hide progress, show flash button again
+        flashProgress.classList.add('hidden');
+        flashButton.style.display = 'flex';
+        
+        // Show user-friendly error message
+        alert(`Flashing failed: ${message || 'Unknown error occurred'}. Please try again.`);
     }
 
     celebrateSuccess() {
@@ -550,13 +593,6 @@ class ESP32Flasher {
         
         // Optional: Add confetti effect or other celebration
         console.log('🎉 Humly Booking Device firmware flashing completed successfully!');
-    }
-
-    handleFlashError(message) {
-        console.error('Flash error:', message);
-        
-        // Show user-friendly error message
-        alert(`Flashing failed: ${message || 'Unknown error occurred'}. Please try again.`);
     }
 }
 
