@@ -1,0 +1,584 @@
+/* Humly-inspired CSS for ESP32 Web Flasher */
+
+/* Import Google Fonts similar to Humly */
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;500;700&display=swap');
+
+/* Color Palette inspired by Humly */
+:root {
+    --primary-teal: #d4f0f0;
+    --accent-teal: #4a9b9b;
+    --dark-teal: #2c7a7a;
+    --success-green: #4caf50;
+    --warning-orange: #ff9800;
+    --error-red: #f44336;
+    --text-primary: #1a1a1a;
+    --text-secondary: #666666;
+    --text-light: #999999;
+    --background: #ffffff;
+    --surface: #fafafa;
+    --border: #e0e0e0;
+    --border-light: #f0f0f0;
+    --shadow: rgba(0, 0, 0, 0.1);
+    --shadow-hover: rgba(0, 0, 0, 0.15);
+}
+
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    color: var(--text-primary);
+    background: var(--background);
+    font-size: 16px;
+}
+
+/* Container and layout */
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+.header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+.logo-section h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 300;
+}
+
+/* Progress indicator */
+.progress-container {
+    margin-bottom: 3rem;
+}
+
+.progress-bar {
+    height: 4px;
+    background: var(--border-light);
+    border-radius: 2px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-teal), var(--dark-teal));
+    border-radius: 2px;
+    width: 33.33%;
+    transition: width 0.6s ease;
+}
+
+.progress-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.step {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    color: var(--text-light);
+    transition: all 0.3s ease;
+}
+
+.step.active {
+    background: var(--accent-teal);
+    color: white;
+}
+
+.step.completed {
+    background: var(--success-green);
+    color: white;
+}
+
+.progress-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+/* Step cards */
+.step-card {
+    background: white;
+    border-radius: 12px;
+    padding: 2.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 20px var(--shadow);
+    border: 1px solid var(--border-light);
+    transition: all 0.3s ease;
+}
+
+.step-card:hover {
+    box-shadow: 0 8px 30px var(--shadow-hover);
+}
+
+.step-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.step-header h2 {
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.step-description {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 300;
+}
+
+/* Connection visual */
+.connection-visual {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 2rem 0;
+    gap: 1rem;
+}
+
+/* Device image styling */
+.device-image {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.esp32-device {
+    width: 120px;
+    height: 120px;
+    object-fit: contain;
+}
+
+.computer-icon {
+    font-size: 3rem;
+}
+
+.cable-line {
+    width: 80px;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent-teal), var(--dark-teal));
+    border-radius: 2px;
+    position: relative;
+}
+
+.cable-line::after {
+    content: '';
+    position: absolute;
+    right: -8px;
+    top: -4px;
+    width: 0;
+    height: 0;
+    border-left: 12px solid var(--accent-teal);
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+}
+
+/* Instructions */
+.instructions {
+    background: var(--surface);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    border-left: 4px solid var(--accent-teal);
+}
+
+.instructions h3 {
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.instructions ol {
+    padding-left: 1.5rem;
+}
+
+.instructions li {
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+}
+
+/* Buttons */
+.primary-button {
+    background: linear-gradient(135deg, var(--accent-teal), var(--dark-teal));
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 56px;
+    justify-content: center;
+}
+
+.primary-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(76, 155, 155, 0.3);
+}
+
+.primary-button:active {
+    transform: translateY(0);
+}
+
+.primary-button.large {
+    padding: 1.25rem 3rem;
+    font-size: 1.2rem;
+}
+
+.primary-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Action sections */
+.action-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Connection help */
+.connection-help {
+    width: 100%;
+    max-width: 500px;
+}
+
+.connection-help details {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid var(--border-light);
+}
+
+.connection-help summary {
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--accent-teal);
+    padding: 0.5rem 0;
+}
+
+.help-content {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-light);
+}
+
+.help-content ul {
+    padding-left: 1.5rem;
+}
+
+.help-content li {
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+}
+
+/* Device info */
+.device-info {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.success-indicator {
+    background: var(--primary-teal);
+    color: var(--dark-teal);
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+/* Version selection */
+.version-selection {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.version-card {
+    background: white;
+    border: 2px solid var(--border-light);
+    border-radius: 12px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.version-card:hover {
+    border-color: var(--accent-teal);
+    box-shadow: 0 4px 15px var(--shadow);
+}
+
+.version-card.selected {
+    border-color: var(--accent-teal);
+    background: var(--primary-teal);
+}
+
+.version-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.version-header h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.badge {
+    background: var(--success-green);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge.recommended {
+    background: var(--accent-teal);
+}
+
+.version-date {
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+
+.version-description {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.changelog {
+    list-style: none;
+    padding: 0;
+}
+
+.changelog li {
+    padding: 0.25rem 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.changelog li::before {
+    content: '✓';
+    color: var(--success-green);
+    margin-right: 0.5rem;
+    font-weight: bold;
+}
+
+/* Flash summary */
+.flash-summary {
+    background: var(--surface);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.summary-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.summary-item:last-child {
+    border-bottom: none;
+}
+
+/* Flash warning */
+.flash-warning {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.flash-warning p {
+    margin: 0;
+    color: #856404;
+}
+
+/* Install button wrapper */
+.install-button {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+/* Flash progress */
+.flash-progress {
+    text-align: center;
+    padding: 2rem;
+}
+
+.progress-info h3 {
+    margin-bottom: 0.5rem;
+    color: var(--accent-teal);
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border-light);
+    border-top: 4px solid var(--accent-teal);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 2rem auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Flash success */
+.flash-success {
+    text-align: center;
+    padding: 2rem;
+}
+
+.success-content h3 {
+    color: var(--success-green);
+    margin-bottom: 1rem;
+    font-size: 1.8rem;
+}
+
+.success-note {
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 1rem;
+}
+
+/* Warning card */
+.warning-card {
+    background: #ffebee;
+    border: 1px solid #ffcdd2;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+}
+
+.warning-card h3 {
+    color: var(--error-red);
+    margin-bottom: 1rem;
+}
+
+/* Footer */
+.footer {
+    margin-top: auto;
+    text-align: center;
+    padding: 2rem 0;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+/* Utility classes */
+.hidden {
+    display: none !important;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem 0.5rem;
+    }
+    
+    .step-card {
+        padding: 1.5rem;
+    }
+    
+    .logo-section h1 {
+        font-size: 2rem;
+    }
+    
+    .connection-visual {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .esp32-device {
+        width: 110px;
+        height: 110px;
+    }
+    
+    .cable-line {
+        width: 40px;
+        height: 4px;
+        transform: rotate(90deg);
+    }
+    
+    .cable-line::after {
+        right: -4px;
+        top: -8px;
+        border-left: 6px solid var(--accent-teal);
+        border-top: 8px solid transparent;
+        border-bottom: 8px solid transparent;
+    }
+    
+    .version-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .summary-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .progress-labels {
+        font-size: 0.8rem;
+    }
+    
+    .primary-button {
+        padding: 0.875rem 1.5rem;
+        font-size: 1rem;
+    }
+    
+    .primary-button.large {
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+    }
+}

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Humly Booking Device Flasher - Simple & Professional</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo-section">
+                <h1>Humly Booking Device Flasher</h1>
+                <p class="subtitle">Professional device programming made simple</p>
+            </div>
+        </header>
+
+        <!-- Browser Check -->
+        <div id="browser-check" class="step-card hidden">
+            <div class="warning-card">
+                <h3>⚠️ Browser Not Supported</h3>
+                <p>This flasher requires Chrome or Edge browser. Safari and Firefox are not supported.</p>
+                <p><strong>Please use Chrome or Edge to continue.</strong></p>
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-steps">
+                <div class="step active" id="step-1">1</div>
+                <div class="step" id="step-2">2</div>
+                <div class="step" id="step-3">3</div>
+            </div>
+            <div class="progress-labels">
+                <span>Connect</span>
+                <span>Select</span>
+                <span>Flash</span>
+            </div>
+        </div>
+
+        <!-- Step 1: Device Connection -->
+        <div class="step-card" id="step1-card">
+            <div class="step-header">
+                <h2>Step 1: Connect Your Humly Booking Device</h2>
+                <p class="step-description">Connect your HBD via USB-C cable</p>
+            </div>
+            
+            <div class="connection-visual">
+                <div class="device-image">
+                    <img src="device-image.png" alt="Humly Booking Device" class="esp32-device">
+                </div>
+                <div class="cable-line"></div>
+                <div class="computer-icon">💻</div>
+            </div>
+
+            <div class="instructions">
+                <h3>Quick Setup:</h3>
+                <ol>
+                    <li>Connect your Humly Booking Device to your computer with a <strong>USB-C cable</strong></li>
+                    <li>Make sure the device is powered on</li>
+                    <li>Click the "Connect Device" button below</li>
+                </ol>
+            </div>
+
+            <div class="action-section">
+                <button id="connect-button" class="primary-button">
+                    <span class="button-text">Connect Device</span>
+                    <span class="button-status" id="connect-status"></span>
+                </button>
+                <div class="connection-help">
+                    <details>
+                        <summary>Need help connecting?</summary>
+                        <div class="help-content">
+                            <p><strong>Device not detected?</strong></p>
+                            <ul>
+                                <li>Try a different USB-C cable (data cable, not just power)</li>
+                                <li>Make sure the device is not in use by another program</li>
+                                <li>Check that your device drivers are installed</li>
+                                <li>Try a different USB port</li>
+                            </ul>
+                        </div>
+                    </details>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Version Selection -->
+        <div class="step-card hidden" id="step2-card">
+            <div class="step-header">
+                <h2>Step 2: Choose Firmware Version</h2>
+                <p class="step-description">Select the firmware version to install</p>
+            </div>
+
+            <div class="device-info" id="device-info">
+                <div class="success-indicator">✅ Humly Booking Device detected and ready!</div>
+            </div>
+
+            <div class="version-selection">
+                <div class="version-card selected" data-version="v1.36.0.16433">
+                    <div class="version-header">
+                        <h3>Version 1.36.0 <span class="badge recommended">Recommended</span></h3>
+                        <span class="version-date">Released: Sep 9, 2025</span>
+                    </div>
+                    <p class="version-description">Latest stable release with bug fixes and improvements</p>
+                    <ul class="changelog">
+                        <li>Bug fixes and stability improvements</li>
+                        <li>Updated ESP-IDF to v5.5.1</li>
+                        <li>Performance optimizations</li>
+                    </ul>
+                </div>
+
+                <div class="version-card" data-version="v1.35.1.12304">
+                    <div class="version-header">
+                        <h3>Version 1.35.1</h3>
+                        <span class="version-date">Released: Aug 22, 2025</span>
+                    </div>
+                    <p class="version-description">Previous stable release</p>
+                    <ul class="changelog">
+                        <li>Previous stable version</li>
+                        <li>Known to work reliably</li>
+                        <li>Use if latest version has issues</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="action-section">
+                <button id="continue-button" class="primary-button">
+                    Continue with Selected Version
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 3: Flashing -->
+        <div class="step-card hidden" id="step3-card">
+            <div class="step-header">
+                <h2>Step 3: Flash Firmware</h2>
+                <p class="step-description">Ready to install firmware to your device</p>
+            </div>
+
+            <div class="flash-summary">
+                <div class="summary-item">
+                    <strong>Device:</strong> <span id="device-type">Humly Booking Device</span>
+                </div>
+                <div class="summary-item">
+                    <strong>Version:</strong> <span id="selected-version">1.36.0 (Latest)</span>
+                </div>
+                <div class="summary-item">
+                    <strong>Components:</strong> Bootloader, App, Partitions, Assets
+                </div>
+            </div>
+
+            <div class="flash-warning">
+                <p><strong>⚠️ Important:</strong> Do not disconnect your device during flashing!</p>
+            </div>
+
+            <div class="action-section">
+                <esp-web-install-button 
+                    id="install-button"
+                    manifest="./manifest.json"
+                    class="install-button">
+                    <button slot="activate" class="primary-button large">
+                        🚀 Flash Firmware Now
+                    </button>
+                    <span slot="unsupported">Your browser is not supported.</span>
+                    <span slot="not-allowed">Installation not allowed.</span>
+                </esp-web-install-button>
+            </div>
+
+            <div class="flash-progress hidden" id="flash-progress">
+                <div class="progress-info">
+                    <h3>Flashing in progress...</h3>
+                    <p>Please keep your device connected</p>
+                </div>
+                <div class="spinner"></div>
+            </div>
+
+            <div class="flash-success hidden" id="flash-success">
+                <div class="success-content">
+                    <h3>🎉 Success!</h3>
+                    <p>Firmware has been successfully installed on your device.</p>
+                    <p class="success-note">Your Humly Booking Device will restart automatically with the new firmware.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Humly Booking Device flashing tool</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

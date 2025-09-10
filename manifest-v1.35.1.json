@@ -1,0 +1,39 @@
+{
+  "name": "Humly Booking Device Firmware",
+  "version": "1.35.1",
+  "home_assistant_domain": "",
+  "funding_url": "",
+  "new_install_skip_erase": false,
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/v1.35.1.12304/bootloader/bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "../firmware/v1.35.1.12304/partition_table/partition-table.bin",
+          "offset": 40960
+        },
+        {
+          "path": "../firmware/v1.35.1.12304/hbd.bin",
+          "offset": 65536
+        },
+        {
+          "path": "../firmware/v1.35.1.12304/ota_data_initial.bin",
+          "offset": 9502720
+        },
+        {
+          "path": "../firmware/v1.35.1.12304/phy_init_data.bin",
+          "offset": 9510912
+        },
+        {
+          "path": "../firmware/v1.35.1.12304/assets.bin",
+          "offset": 9519104
+        }
+      ]
+    }
+  ]
+}
