@@ -374,7 +374,34 @@ class ESP32Flasher {
             }
         }
         
-        return new Uint8Array(decoded);
+        const result = new Uint8Array(decoded);
+        
+        // Parse ESP32 response format: direction(1), cmd(1), size(2), checksum(4), data(...)
+        if (result.length >= 8) {
+            const direction = result[0];
+            const cmd = result[1];
+            const size = result[2] | (result[3] << 8);
+            const checksum = result[4] | (result[5] << 8) | (result[6] << 16) | (result[7] << 24);
+            
+            console.log(`📋 Response: dir=0x${direction.toString(16)} cmd=0x${cmd.toString(16)} size=${size} checksum=0x${checksum.toString(16)}`);
+            
+            if (direction === 0x01) { // Response direction
+                if (size > 0 && result.length >= 8 + size) {
+                    const responseData = result.slice(8, 8 + size);
+                    console.log('📄 Response data:', Array.from(responseData).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    
+                    // Check for error responses
+                    if (size >= 4) {
+                        const status = responseData[0] | (responseData[1] << 8) | (responseData[2] << 16) | (responseData[3] << 24);
+                        if (status !== 0) {
+                            console.log(`❌ ESP32 error response: status=0x${status.toString(16)}`);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return result;
     }
 
     calculateChecksum(data) {
@@ -439,25 +466,57 @@ class ESP32Flasher {
         throw new Error('ESP32 SYNC failed after 3 attempts');
     }
 
-    async readResponse(timeoutMs = 5000) {
-        const timeout = setTimeout(() => {
-            throw new Error('Response timeout');
-        }, timeoutMs);
+    async readResponse(timeoutMs = 10000) {
+        console.log(`⏳ Waiting for response (timeout: ${timeoutMs}ms)...`);
         
-        try {
-            const { value, done } = await this.reader.read();
-            clearTimeout(timeout);
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error(`Response timeout after ${timeoutMs}ms`));
+            }, timeoutMs);
             
-            if (done) {
-                throw new Error('Reader closed');
-            }
+            const chunks = [];
+            let totalLength = 0;
             
-            console.log('📨 Received response:', Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' '));
-            return this.slipDecode(value);
-        } catch (error) {
-            clearTimeout(timeout);
-            throw error;
-        }
+            const readChunk = async () => {
+                try {
+                    const { value, done } = await this.reader.read();
+                    
+                    if (done) {
+                        clearTimeout(timeout);
+                        reject(new Error('Reader closed'));
+                        return;
+                    }
+                    
+                    console.log('📨 Received chunk:', Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    chunks.push(value);
+                    totalLength += value.length;
+                    
+                    // Check if we have a complete SLIP frame (ends with 0xC0)
+                    if (value[value.length - 1] === 0xC0) {
+                        clearTimeout(timeout);
+                        
+                        // Combine all chunks
+                        const combined = new Uint8Array(totalLength);
+                        let offset = 0;
+                        for (const chunk of chunks) {
+                            combined.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+                        
+                        console.log('📨 Complete response:', Array.from(combined).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                        resolve(this.slipDecode(combined));
+                    } else {
+                        // Continue reading more chunks
+                        readChunk();
+                    }
+                } catch (error) {
+                    clearTimeout(timeout);
+                    reject(error);
+                }
+            };
+            
+            readChunk();
+        });
     }
 
     async esp32FlashBegin(size, offset) {
@@ -468,6 +527,10 @@ class ESP32Flasher {
         const packetSize = 1024; // 1KB packets
         const numPackets = Math.ceil(size / packetSize);
         
+        console.log(`   Erase size: ${eraseSize} bytes (${eraseSize/65536} blocks)`);
+        console.log(`   Packets: ${numPackets} x ${packetSize} bytes`);
+        console.log(`   Offset: 0x${offset.toString(16)}`);
+        
         // FLASH_BEGIN command data: erase_size, num_packets, packet_size, offset
         const data = new Uint8Array(16);
         const view = new DataView(data.buffer);
@@ -476,10 +539,14 @@ class ESP32Flasher {
         view.setUint32(8, packetSize, true);
         view.setUint32(12, offset, true);
         
+        console.log('📦 FLASH_BEGIN data:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+        
         const command = this.createCommand(0x02, data);
+        console.log('📤 Sending FLASH_BEGIN command:', Array.from(command).map(b => b.toString(16).padStart(2, '0')).join(' '));
         await this.writer.write(command);
         
-        const response = await this.readResponse();
+        // Flash erase operations can take a long time - use 30 second timeout
+        const response = await this.readResponse(30000);
         console.log('✅ FLASH_BEGIN successful');
         return response;
     }

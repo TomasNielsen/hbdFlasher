@@ -9,6 +9,9 @@
     {
       "chipFamily": "ESP32-S3",
       "improv": false,
+      "flashMode": "dio",
+      "flashFreq": "80m", 
+      "flashSize": "16MB",
       "parts": [
         {
           "path": "./firmware/v1.36.0.16433/bootloader/bootloader.bin",
