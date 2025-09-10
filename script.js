@@ -169,6 +169,7 @@ class ESP32Flasher {
                 "builds": [
                     {
                         "chipFamily": "ESP32-S3",
+                        "improv": false,
                         "parts": [
                             {
                                 "path": `../firmware/${version}/bootloader/bootloader.bin`,

@@ -8,6 +8,7 @@
   "builds": [
     {
       "chipFamily": "ESP32-S3",
+      "improv": false,
       "parts": [
         {
           "path": "../firmware/v1.36.0.16433/bootloader/bootloader.bin",
