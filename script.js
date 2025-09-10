@@ -279,17 +279,36 @@ class ESP32Flasher {
     setupESPWebToolsListeners() {
         const installButton = document.querySelector('esp-web-install-button');
         if (installButton) {
-            // Override port selection to use our pre-connected port
-            if (this.portConnected && this.connectedPort) {
-                // Pre-configure ESP Web Tools with our port
-                installButton._port = this.connectedPort;
-                console.log('✅ ESP Web Tools configured with pre-connected port');
-            }
-            
             // Listen for install events
             installButton.addEventListener('state-changed', (event) => {
                 this.handleInstallStateChange(event.detail);
             });
+        }
+    }
+
+    // Override navigator.serial.requestPort to return our existing port
+    setupPortInterception() {
+        if (this.portConnected && this.connectedPort) {
+            // Store the original requestPort function
+            const originalRequestPort = navigator.serial.requestPort.bind(navigator.serial);
+            
+            // Override with our port
+            navigator.serial.requestPort = () => {
+                console.log('🔄 Using existing port instead of showing port selection dialog');
+                return Promise.resolve(this.connectedPort);
+            };
+            
+            // Store original function for cleanup
+            this.originalRequestPort = originalRequestPort;
+        }
+    }
+
+    // Restore original port selection behavior
+    restorePortSelection() {
+        if (this.originalRequestPort) {
+            navigator.serial.requestPort = this.originalRequestPort;
+            console.log('🔄 Restored original port selection behavior');
+            this.originalRequestPort = null;
         }
     }
 
@@ -431,12 +450,8 @@ class ESP32Flasher {
             document.getElementById('selected-version').textContent = versionInfo.name;
         }
         
-        // Configure ESP Web Tools with our pre-connected port before advancing
-        const installButton = document.querySelector('esp-web-install-button');
-        if (installButton && this.portConnected && this.connectedPort) {
-            installButton._port = this.connectedPort;
-            console.log('🔄 ESP Web Tools reconfigured with existing port for Step 3');
-        }
+        // Setup port interception to avoid redundant port selection
+        this.setupPortInterception();
         
         // Advance to step 3
         this.advanceToStep(3);
@@ -454,17 +469,6 @@ class ESP32Flasher {
         
         // Update current step
         this.currentStep = step;
-        
-        // If advancing to step 3, ensure ESP Web Tools is configured
-        if (step === 3 && this.portConnected && this.connectedPort) {
-            setTimeout(() => {
-                const installButton = document.querySelector('esp-web-install-button');
-                if (installButton) {
-                    installButton._port = this.connectedPort;
-                    console.log('🔧 Final ESP Web Tools port configuration for Step 3');
-                }
-            }, 100);
-        }
         
         // Add some visual flair
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -516,6 +520,9 @@ class ESP32Flasher {
                 flashProgress.classList.add('hidden');
                 flashSuccess.classList.remove('hidden');
                 
+                // Restore original port selection function
+                this.restorePortSelection();
+                
                 // Celebrate!
                 this.celebrateSuccess();
                 break;
@@ -524,6 +531,10 @@ class ESP32Flasher {
                 // Handle error
                 flashProgress.classList.add('hidden');
                 installButton.style.display = 'flex';
+                
+                // Restore original port selection function
+                this.restorePortSelection();
+                
                 this.handleFlashError(state.message);
                 break;
         }
