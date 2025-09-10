@@ -392,8 +392,8 @@ class ESP32Flasher {
                 "version": version.replace('v', ''),
                 "home_assistant_domain": "",
                 "funding_url": "",
-                "new_install_skip_erase": false,
-                "new_install_prompt_erase": true,
+                "new_install_skip_erase": true,
+                "new_install_prompt_erase": false,
                 "builds": [
                     {
                         "chipFamily": "ESP32-S3",
