@@ -238,7 +238,7 @@ class ESP32Flasher {
 
     async loadVersions() {
         try {
-            const response = await fetch('../firmware/versions.json');
+            const response = await fetch('./firmware/versions.json');
             this.versions = await response.json();
             console.log('Loaded versions:', this.versions);
         } catch (error) {
@@ -293,11 +293,11 @@ class ESP32Flasher {
             flashProgress.classList.remove('hidden');
             
             console.log('🚀 Starting direct firmware flash with esptool-js...');
-            console.log('Available globals:', { ESPLoader, Transport, esptool: window.esptool });
+            console.log('Available globals:', typeof esptool, esptool);
             
             // Create transport for the existing port
-            const TransportClass = Transport || window.esptool?.Transport;
-            const ESPLoaderClass = ESPLoader || window.esptool?.ESPLoader;
+            const TransportClass = esptool?.Transport;
+            const ESPLoaderClass = esptool?.ESPLoader;
             
             if (!TransportClass) {
                 throw new Error('Transport class not available');
@@ -340,12 +340,12 @@ class ESP32Flasher {
     // Load firmware binary files for flashing
     async loadFirmwareFiles(version) {
         const files = [
-            { path: `../firmware/${version}/bootloader/bootloader.bin`, address: 0 },
-            { path: `../firmware/${version}/partition_table/partition-table.bin`, address: 40960 },
-            { path: `../firmware/${version}/hbd.bin`, address: 65536 },
-            { path: `../firmware/${version}/ota_data_initial.bin`, address: 9502720 },
-            { path: `../firmware/${version}/phy_init_data.bin`, address: 9510912 },
-            { path: `../firmware/${version}/assets.bin`, address: 9519104 }
+            { path: `./firmware/${version}/bootloader/bootloader.bin`, address: 0 },
+            { path: `./firmware/${version}/partition_table/partition-table.bin`, address: 40960 },
+            { path: `./firmware/${version}/hbd.bin`, address: 65536 },
+            { path: `./firmware/${version}/ota_data_initial.bin`, address: 9502720 },
+            { path: `./firmware/${version}/phy_init_data.bin`, address: 9510912 },
+            { path: `./firmware/${version}/assets.bin`, address: 9519104 }
         ];
 
         const firmwareFiles = [];

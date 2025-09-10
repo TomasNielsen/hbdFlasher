@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <script type="module">
-        import * as esptool from 'https://unpkg.com/esptool-js/lib/index.js';
-        console.log('Available esptool exports:', Object.keys(esptool));
-        window.esptool = esptool;
-        window.ESPLoader = esptool.ESPLoader;
-        window.Transport = esptool.Transport;
+    <script src="https://cdn.jsdelivr.net/npm/esptool-js@0.4.6/lib/index.umd.js"></script>
+    <script>
+        console.log('esptool loaded:', typeof esptool);
+        if (typeof esptool !== 'undefined') {
+            console.log('Available esptool properties:', Object.keys(esptool));
+        }
     </script>
 </head>
 <body>
