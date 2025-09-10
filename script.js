@@ -164,56 +164,30 @@ class ESP32Flasher {
             console.log('   --before default_reset --after hard_reset --no-stub');
             console.log('   --flash_mode dio --flash_freq 80m --flash_size 16MB');
             
-            // Create fresh Transport and ESPLoader for this flash operation
-            console.log('🔌 Creating fresh transport and ESPLoader...');
-            this.transport = new window.esptoolPackage.Transport(this.connectedPort);
-            
-            this.espLoader = new window.esptoolPackage.ESPLoader({
-                transport: this.transport,
-                baudrate: 115200, // Match Windows flasher baudrate
-                terminal: {
-                    clean() {},
-                    writeLine(data) { console.log('ESP:', data); },
-                    write(data) { console.log('ESP:', data); }
-                }
-            });
-            
-            // Force ESP32-S3 chip type to match Windows flasher --chip esp32s3
-            console.log('⚙️ Forcing ESP32-S3 chip type to skip auto-detection...');
+            // Bypass esptool-js and implement direct ESP32-S3 flash protocol
+            console.log('🔧 Using direct Web Serial ESP32-S3 flash protocol...');
             
             // Perform hardware reset sequence before connection (--before default_reset)
             console.log('🔄 Performing hardware reset sequence...');
             await this.performHardwareReset();
             
-            // Connect to ESP32-S3 without auto-detection
-            console.log('🔗 Connecting to ESP32-S3...');
-            console.log('🔍 Attempting ESP32-S3 specific connection...');
-            
-            // Try different approaches to force ESP32-S3 mode
-            let chip;
-            try {
-                // First attempt: disable detection and force connect
-                console.log('   Trying connect with detecting=false...');
-                chip = await this.espLoader.connect('default_reset', 7, false);
-                console.log('✅ Connected with detection disabled:', chip);
-            } catch (error) {
-                console.log('⚠️ Detection disabled failed:', error.message);
-                // Fallback: try manual chip detection first
-                try {
-                    console.log('   Trying manual detectChip...');
-                    chip = await this.espLoader.detectChip('default_reset');
-                    console.log('✅ Chip detected:', chip);
-                } catch (error2) {
-                    console.log('⚠️ Manual detect failed:', error2.message);
-                    throw new Error(`ESP32-S3 connection failed: ${error.message}`);
-                }
-            }
-            
-            console.log('Chip info:', {
-                chipName: chip,
-                features: this.espLoader.getChipFeatures && this.espLoader.getChipFeatures(),
-                macAddr: this.espLoader.readMac && await this.espLoader.readMac().catch(e => 'Could not read MAC')
+            // Initialize direct serial communication
+            console.log('🔗 Opening serial port for direct communication...');
+            await this.connectedPort.open({
+                baudRate: 115200,
+                dataBits: 8,
+                stopBits: 1,
+                parity: 'none'
             });
+            
+            // Get readers/writers for communication
+            this.reader = this.connectedPort.readable.getReader();
+            this.writer = this.connectedPort.writable.getWriter();
+            
+            console.log('📡 Attempting ESP32-S3 sync...');
+            await this.esp32Sync();
+            
+            console.log('✅ ESP32-S3 communication established!');
             
             // Load firmware files
             console.log('📁 Loading firmware files...');
@@ -368,6 +342,134 @@ class ESP32Flasher {
 
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // ESP32 Serial Protocol Implementation
+    slipEncode(data) {
+        const encoded = [];
+        encoded.push(0xC0); // SLIP frame start
+        
+        for (const byte of data) {
+            if (byte === 0xDB) {
+                encoded.push(0xDB, 0xDD);
+            } else if (byte === 0xC0) {
+                encoded.push(0xDB, 0xDC);
+            } else {
+                encoded.push(byte);
+            }
+        }
+        
+        encoded.push(0xC0); // SLIP frame end
+        return new Uint8Array(encoded);
+    }
+
+    slipDecode(data) {
+        const decoded = [];
+        let escaped = false;
+        
+        for (const byte of data) {
+            if (byte === 0xC0) {
+                continue; // Skip frame markers
+            } else if (byte === 0xDB) {
+                escaped = true;
+            } else if (escaped) {
+                if (byte === 0xDC) {
+                    decoded.push(0xC0);
+                } else if (byte === 0xDD) {
+                    decoded.push(0xDB);
+                } else {
+                    decoded.push(byte);
+                }
+                escaped = false;
+            } else {
+                decoded.push(byte);
+            }
+        }
+        
+        return new Uint8Array(decoded);
+    }
+
+    calculateChecksum(data) {
+        let checksum = 0xEF;
+        for (const byte of data) {
+            checksum ^= byte;
+        }
+        return checksum;
+    }
+
+    createCommand(cmd, data = new Uint8Array(0)) {
+        const packet = new Uint8Array(8 + data.length);
+        const view = new DataView(packet.buffer);
+        
+        // Command packet structure
+        view.setUint8(0, 0x00);           // Direction (request)
+        view.setUint8(1, cmd);            // Command
+        view.setUint16(2, data.length, true); // Size (little endian)
+        view.setUint32(4, this.calculateChecksum(data), true); // Checksum
+        
+        // Copy data
+        if (data.length > 0) {
+            packet.set(data, 8);
+        }
+        
+        return this.slipEncode(packet);
+    }
+
+    async esp32Sync() {
+        console.log('📡 Sending ESP32 SYNC command...');
+        
+        // SYNC command payload: 0x07 0x07 0x12 0x20 + 32 bytes of 0x55
+        const syncData = new Uint8Array(36);
+        syncData[0] = 0x07;
+        syncData[1] = 0x07;
+        syncData[2] = 0x12;
+        syncData[3] = 0x20;
+        for (let i = 4; i < 36; i++) {
+            syncData[i] = 0x55;
+        }
+        
+        const syncCommand = this.createCommand(0x08, syncData);
+        
+        // Send sync command multiple times for reliability
+        for (let attempt = 0; attempt < 3; attempt++) {
+            console.log(`   SYNC attempt ${attempt + 1}...`);
+            await this.writer.write(syncCommand);
+            
+            try {
+                const response = await this.readResponse(1000); // 1 second timeout
+                if (response) {
+                    console.log('✅ ESP32 SYNC successful');
+                    return true;
+                }
+            } catch (error) {
+                console.log(`   SYNC attempt ${attempt + 1} failed:`, error.message);
+            }
+            
+            await this.delay(100);
+        }
+        
+        throw new Error('ESP32 SYNC failed after 3 attempts');
+    }
+
+    async readResponse(timeoutMs = 5000) {
+        const timeout = setTimeout(() => {
+            throw new Error('Response timeout');
+        }, timeoutMs);
+        
+        try {
+            const { value, done } = await this.reader.read();
+            clearTimeout(timeout);
+            
+            if (done) {
+                throw new Error('Reader closed');
+            }
+            
+            console.log('📨 Received response:', Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' '));
+            return this.slipDecode(value);
+        } catch (error) {
+            clearTimeout(timeout);
+            throw error;
+        }
     }
 
     async attemptDeviceRecovery() {
