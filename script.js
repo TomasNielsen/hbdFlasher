@@ -203,6 +203,8 @@ class ESP32Flasher {
         this.selectedVersion = 'v1.36.0.16433';
         this.manifestData = null;
         this.versions = null;
+        this.connectedPort = null;
+        this.portConnected = false;
         
         this.init();
     }
@@ -277,6 +279,13 @@ class ESP32Flasher {
     setupESPWebToolsListeners() {
         const installButton = document.querySelector('esp-web-install-button');
         if (installButton) {
+            // Override port selection to use our pre-connected port
+            if (this.portConnected && this.connectedPort) {
+                // Pre-configure ESP Web Tools with our port
+                installButton._port = this.connectedPort;
+                console.log('✅ ESP Web Tools configured with pre-connected port');
+            }
+            
             // Listen for install events
             installButton.addEventListener('state-changed', (event) => {
                 this.handleInstallStateChange(event.detail);
@@ -293,11 +302,14 @@ class ESP32Flasher {
         connectButton.innerHTML = '<span class="button-text">Connecting...</span>';
         
         try {
-            // Simple connection - just request port access
+            // Request port access and store it
             const port = await navigator.serial.requestPort();
             this.connectedPort = port;
+            this.portConnected = true;
             
-            // Success - device connected (no bootloader prep yet)
+            console.log('✅ Port selected and stored for later use');
+            
+            // Success - device connected
             this.updateConnectionSuccess();
             
             // Auto-advance to step 2 after a brief delay
@@ -419,6 +431,13 @@ class ESP32Flasher {
             document.getElementById('selected-version').textContent = versionInfo.name;
         }
         
+        // Configure ESP Web Tools with our pre-connected port before advancing
+        const installButton = document.querySelector('esp-web-install-button');
+        if (installButton && this.portConnected && this.connectedPort) {
+            installButton._port = this.connectedPort;
+            console.log('🔄 ESP Web Tools reconfigured with existing port for Step 3');
+        }
+        
         // Advance to step 3
         this.advanceToStep(3);
     }
@@ -435,6 +454,17 @@ class ESP32Flasher {
         
         // Update current step
         this.currentStep = step;
+        
+        // If advancing to step 3, ensure ESP Web Tools is configured
+        if (step === 3 && this.portConnected && this.connectedPort) {
+            setTimeout(() => {
+                const installButton = document.querySelector('esp-web-install-button');
+                if (installButton) {
+                    installButton._port = this.connectedPort;
+                    console.log('🔧 Final ESP Web Tools port configuration for Step 3');
+                }
+            }, 100);
+        }
         
         // Add some visual flair
         window.scrollTo({ top: 0, behavior: 'smooth' });
