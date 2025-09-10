@@ -398,7 +398,12 @@ class ESP32Flasher {
                     if (size >= 4) {
                         const status = responseData[0] | (responseData[1] << 8) | (responseData[2] << 16) | (responseData[3] << 24);
                         if (status !== 0) {
-                            console.log(`❌ ESP32 error response: status=0x${status.toString(16)}`);
+                            // Status 0x501 appears to be non-critical during FLASH_DATA - process continues
+                            if (status === 0x501) {
+                                console.log(`⚠️ ESP32 non-critical status: 0x${status.toString(16)} (continuing...)`);
+                            } else {
+                                console.log(`❌ ESP32 error response: status=0x${status.toString(16)}`);
+                            }
                         }
                     }
                 }
@@ -599,8 +604,42 @@ class ESP32Flasher {
             const file = firmwareData[fileIndex];
             console.log(`📂 Flashing file ${fileIndex + 1}/${firmwareData.length}: ${file.data.length} bytes at 0x${file.address.toString(16)}`);
             
-            // Begin flash for this file
-            await this.esp32FlashBegin(file.data.length, file.address);
+            // Try to begin flash for this file with retry logic
+            let retryCount = 0;
+            const maxRetries = 3;
+            
+            while (retryCount < maxRetries) {
+                try {
+                    await this.esp32FlashBegin(file.data.length, file.address);
+                    break; // Success, exit retry loop
+                } catch (error) {
+                    retryCount++;
+                    console.log(`⚠️ FLASH_BEGIN attempt ${retryCount} failed for file ${fileIndex + 1}:`, error.message);
+                    
+                    if (retryCount < maxRetries) {
+                        console.log('🔧 Attempting device recovery...');
+                        
+                        // Try to re-establish communication
+                        try {
+                            // Small delay before recovery attempt
+                            await this.delay(1000);
+                            
+                            // Try SYNC to see if device is still responsive
+                            await this.esp32Sync();
+                            console.log('✅ Device recovery successful, retrying FLASH_BEGIN...');
+                        } catch (syncError) {
+                            console.log('❌ Device recovery failed:', syncError.message);
+                            
+                            // If this is the last retry, throw the error
+                            if (retryCount === maxRetries) {
+                                throw new Error(`Failed to flash file ${fileIndex + 1} after ${maxRetries} attempts: ${error.message}`);
+                            }
+                        }
+                    } else {
+                        throw new Error(`Failed to flash file ${fileIndex + 1} after ${maxRetries} attempts: ${error.message}`);
+                    }
+                }
+            }
             
             // Send data in 1KB chunks
             const chunkSize = 1024;
@@ -622,6 +661,12 @@ class ESP32Flasher {
             // End flash for this file
             await this.esp32FlashEnd(false); // Don't reboot until all files are done
             console.log(`✅ File ${fileIndex + 1} flashed successfully`);
+            
+            // Add delay between files to prevent device reset issues
+            if (fileIndex < firmwareData.length - 1) {
+                console.log('⏳ Waiting 3 seconds before next file...');
+                await this.delay(3000);
+            }
         }
         
         console.log('🎉 All firmware files flashed successfully!');
