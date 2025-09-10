@@ -203,8 +203,6 @@ class ESP32Flasher {
         this.selectedVersion = 'v1.36.0.16433';
         this.manifestData = null;
         this.versions = null;
-        this.bootloaderController = new ESP32BootloaderController();
-        this.connectedPort = null;
         
         this.init();
     }
@@ -295,38 +293,17 @@ class ESP32Flasher {
         connectButton.innerHTML = '<span class="button-text">Connecting...</span>';
         
         try {
-            // Request serial port access
+            // Simple connection - just request port access
             const port = await navigator.serial.requestPort();
             this.connectedPort = port;
             
-            // Connect bootloader controller for device preparation
-            const bootloaderConnected = await this.bootloaderController.connect(port);
+            // Success - device connected (no bootloader prep yet)
+            this.updateConnectionSuccess();
             
-            if (bootloaderConnected) {
-                // Try to enter bootloader mode immediately
-                connectButton.innerHTML = '<span class="button-text">Preparing device...</span>';
-                
-                const bootloaderMode = await this.bootloaderController.enterBootloaderMode();
-                
-                if (bootloaderMode) {
-                    this.updateConnectionSuccess();
-                    console.log('✅ Device prepared and ready for flashing');
-                    
-                    // Auto-advance to step 2 after confirmation
-                    setTimeout(() => {
-                        this.advanceToStep(2);
-                    }, 1500);
-                } else {
-                    // Bootloader preparation failed, but still connected
-                    console.warn('⚠️ Bootloader preparation failed, but device is connected');
-                    this.updateConnectionSuccess();
-                    setTimeout(() => {
-                        this.advanceToStep(2);
-                    }, 1500);
-                }
-            } else {
-                throw new Error('Failed to establish bootloader communication');
-            }
+            // Auto-advance to step 2 after a brief delay
+            setTimeout(() => {
+                this.advanceToStep(2);
+            }, 1500);
             
         } catch (error) {
             // User cancelled or connection failed
@@ -435,24 +412,11 @@ class ESP32Flasher {
         }
     }
 
-    async proceedToFlashing() {
+    proceedToFlashing() {
         // Update summary with selected version
         const versionInfo = this.versions.versions.find(v => v.version === this.selectedVersion);
         if (versionInfo) {
             document.getElementById('selected-version').textContent = versionInfo.name;
-        }
-        
-        // Important: Release the bootloader controller port so ESP Web Tools can use it
-        if (this.bootloaderController && this.bootloaderController.isInBootloaderMode) {
-            console.log('🔄 Releasing port from bootloader controller for ESP Web Tools...');
-            
-            // Stop keep-alive but keep device in prepared state
-            this.bootloaderController.stopKeepAlive();
-            
-            // Close our connection so ESP Web Tools can open it
-            await this.bootloaderController.disconnect();
-            
-            console.log('✅ Port released - ESP Web Tools can now take over');
         }
         
         // Advance to step 3
@@ -543,20 +507,8 @@ class ESP32Flasher {
         // Update progress to 100%
         this.updateProgress(3);
         
-        // Stop bootloader keep-alive since flashing is complete
-        if (this.bootloaderController) {
-            this.bootloaderController.stopKeepAlive();
-        }
-        
         // Optional: Add confetti effect or other celebration
         console.log('🎉 Humly Booking Device firmware flashing completed successfully!');
-    }
-
-    // Clean up resources when page unloads
-    cleanup() {
-        if (this.bootloaderController) {
-            this.bootloaderController.disconnect();
-        }
     }
 
     handleFlashError(message) {
@@ -569,12 +521,7 @@ class ESP32Flasher {
 
 // Initialize the flasher when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    const flasher = new ESP32Flasher();
-    
-    // Clean up resources when page unloads
-    window.addEventListener('beforeunload', () => {
-        flasher.cleanup();
-    });
+    new ESP32Flasher();
 });
 
 // Add some helper animations
