@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <script src="https://unpkg.com/esptool-js@0.4.6/bundle.js"></script>
 </head>
 <body>
     <div class="container">
@@ -155,29 +155,14 @@
             </div>
 
             <div class="flash-warning">
-                <p><strong>⚡ Seamless Flash Process:</strong></p>
-                <ul style="text-align: left; margin: 0.5rem 0; padding-left: 1.5rem;">
-                    <li><strong>Device is already connected</strong> from Step 1</li>
-                    <li><strong>No port selection needed</strong> - using existing connection</li>
-                    <li><strong>Click "Flash Firmware Now"</strong> to begin immediately</li>
-                    <li><strong>Faster timing</strong> - eliminates connection delays!</li>
-                </ul>
+                <p><strong>⚠️ Important:</strong> Keep your device connected during the entire flashing process.</p>
+                <p>The process will take about 2-3 minutes. Do not disconnect the USB cable or close this browser tab.</p>
             </div>
 
             <div class="action-section">
-                <button id="quick-flash-button" class="primary-button large" style="background: linear-gradient(135deg, #ff6b35, #ff8e53); margin-bottom: 1rem;">
-                    ⚡ Quick Flash (Auto-Click Dialogs)
+                <button id="flash-button" class="primary-button large">
+                    🚀 Flash Firmware Now
                 </button>
-                <esp-web-install-button 
-                    id="install-button"
-                    manifest="./manifest.json"
-                    class="install-button">
-                    <button slot="activate" class="primary-button large">
-                        🚀 Flash Firmware Now (Manual)
-                    </button>
-                    <span slot="unsupported">Your browser is not supported.</span>
-                    <span slot="not-allowed">Installation not allowed.</span>
-                </esp-web-install-button>
             </div>
 
             <div class="flash-progress hidden" id="flash-progress">
