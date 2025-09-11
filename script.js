@@ -184,9 +184,9 @@ class ESP32Flasher {
             console.log('🔄 Performing hardware reset to enter bootloader...');
             await this.performHardwareReset();
             
-            // Wait for bootloader to initialize
+            // Wait longer for bootloader to initialize (especially on first connection)
             console.log('⏳ Waiting for ESP32-S3 bootloader to initialize...');
-            await this.delay(2000);
+            await this.delay(3000); // Increased from 2s to 3s for better reliability
             
             console.log('📡 Attempting ESP32-S3 sync...');
             await this.esp32Sync();
@@ -210,7 +210,13 @@ class ESP32Flasher {
             
             await this.esp32FlashFirmware(firmwareData);
             
+            // Force hardware reset to ensure device boots into new firmware
+            console.log('🔄 Forcing hardware reset to boot new firmware...');
+            await this.forceDeviceReboot();
+            
             console.log('✅ Firmware flashing completed successfully!');
+            console.log('🔍 Device should now be running new firmware v1.36.0.16433');
+            console.log('⚠️ If device shows old firmware after manual reset, please report this issue');
             
             // Show success
             flashProgress.classList.add('hidden');
@@ -300,7 +306,7 @@ class ESP32Flasher {
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
             
-            await this.delay(100); // Hold reset for 100ms
+            await this.delay(200); // Hold reset longer for more reliable entry
             
             // Step 2: Release reset while keeping GPIO0 low (enter bootloader)
             console.log('📍 Step 2: Releasing reset, keeping bootloader mode...');
@@ -309,7 +315,7 @@ class ESP32Flasher {
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
             
-            await this.delay(50); // Hold bootloader mode
+            await this.delay(100); // Hold bootloader mode longer
             
             // Step 3: Release GPIO0 - device should be in bootloader mode
             console.log('📍 Step 3: Releasing GPIO0, device in bootloader mode...');
@@ -318,7 +324,7 @@ class ESP32Flasher {
                 requestToSend: true        // GPIO0 = HIGH (release)
             });
             
-            await this.delay(100); // Let device stabilize
+            await this.delay(200); // Let device stabilize longer
             
             console.log('✅ Hardware reset completed - device should be in bootloader mode');
             
@@ -646,12 +652,17 @@ class ESP32Flasher {
     }
 
     async esp32FlashEnd(reboot = true) {
-        console.log('🏁 FLASH_END');
+        console.log(`🏁 FLASH_END (reboot=${reboot})`);
         
-        // FLASH_END command data: reboot flag (0 = reboot, 1 = run user code)
+        // FLASH_END command data: reboot flag
+        // Research shows esptool.py uses: struct.pack("<I", int(not reboot))
+        // This means: reboot=true -> flag=0, reboot=false -> flag=1
         const data = new Uint8Array(4);
         const view = new DataView(data.buffer);
-        view.setUint32(0, reboot ? 0 : 1, true);
+        const rebootFlag = reboot ? 0 : 1;
+        view.setUint32(0, rebootFlag, true);
+        
+        console.log(`📤 FLASH_END reboot flag: ${rebootFlag} (reboot=${reboot})`);
         
         const command = this.createCommand(0x04, data);
         
@@ -755,6 +766,76 @@ class ESP32Flasher {
         }
         
         console.log('🎉 All firmware files flashed successfully!');
+    }
+
+    async forceDeviceReboot() {
+        console.log('🔄 Performing forced ESP32 reboot into normal mode...');
+        
+        try {
+            // Get the raw serial port for signal control
+            const port = this.connectedPort;
+            
+            // Check if port supports signal control
+            if (typeof port.setSignals !== 'function') {
+                console.log('⚠️ Port does not support signal control - skipping hardware reboot');
+                return;
+            }
+            
+            console.log('🔧 ESP32 normal boot sequence:');
+            console.log('   DTR=LOW (reset), RTS=HIGH (normal mode)');
+            
+            // Step 1: Assert reset and set normal boot mode
+            await port.setSignals({
+                dataTerminalReady: false,  // EN = LOW (reset)
+                requestToSend: true        // GPIO0 = HIGH (normal mode)
+            });
+            
+            await this.delay(100); // Hold reset
+            
+            // Step 2: Release reset - device boots into normal mode
+            console.log('🚀 Releasing reset - device should boot into new firmware');
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)  
+                requestToSend: true        // GPIO0 = HIGH (normal mode)
+            });
+            
+            await this.delay(500); // Let device boot
+            
+            console.log('✅ Hardware reboot completed - device should be running new firmware');
+            
+        } catch (error) {
+            console.log('⚠️ Hardware reboot failed:', error.message);
+        }
+        
+        // Clean up communication after reboot
+        await this.cleanupAfterReboot();
+    }
+
+    async cleanupAfterReboot() {
+        console.log('🧹 Cleaning up after reboot...');
+        
+        try {
+            // Close readers/writers
+            if (this.reader) {
+                await this.reader.releaseLock();
+                this.reader = null;
+            }
+            if (this.writer) {
+                await this.writer.releaseLock();
+                this.writer = null;
+            }
+            
+            // Close port after delay to let device boot
+            await this.delay(1000);
+            
+            if (this.connectedPort && this.connectedPort.readable) {
+                await this.connectedPort.close();
+            }
+            
+            console.log('✅ Cleanup completed - device should be running new firmware');
+        } catch (error) {
+            console.log('⚠️ Cleanup failed:', error.message);
+        }
     }
 
     async esp32HardReset() {
