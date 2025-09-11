@@ -146,7 +146,7 @@
             logToPage(args.join(' '), 'error');
         };
 
-        window.startFlashing = async () => {
+        async function startFlashing() {
             const flashBtn = document.getElementById('flash-btn');
             
             try {
@@ -178,7 +178,9 @@
             }
         };
 
-        // Page initialization
+        // Expose function globally and initialize page
+        window.startFlashing = startFlashing;
+        
         window.addEventListener('DOMContentLoaded', () => {
             logToPage('🔧 ESP Web Tools Test Page Loaded');
             logToPage('📋 Testing secure boot device compatibility');
