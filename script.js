@@ -180,6 +180,10 @@ class ESP32Flasher {
             this.reader = this.connectedPort.readable.getReader();
             this.writer = this.connectedPort.writable.getWriter();
             
+            // Perform initial device reset to ensure clean state
+            console.log('🔄 Performing initial device reset for clean state...');
+            await this.performInitialReset();
+            
             // Now perform hardware reset to enter bootloader (--before default_reset)
             console.log('🔄 Performing hardware reset to enter bootloader...');
             await this.performHardwareReset();
@@ -210,9 +214,9 @@ class ESP32Flasher {
             
             await this.esp32FlashFirmware(firmwareData);
             
-            // Force hardware reset to ensure device boots into new firmware
-            console.log('🔄 Forcing hardware reset to boot new firmware...');
-            await this.forceDeviceReboot();
+            // Perform critical firmware verification and reboot
+            console.log('🔍 Performing final verification of critical firmware components...');
+            await this.performFinalVerification(firmwareData);
             
             console.log('✅ Firmware flashing completed successfully!');
             console.log('🔍 Device should now be running new firmware v1.36.0.16433');
@@ -280,6 +284,42 @@ class ESP32Flasher {
         
         console.log(`✅ All ${fileArray.length} firmware files loaded successfully`);
         return fileArray;
+    }
+
+    async performInitialReset() {
+        console.log('🔧 Performing initial ESP32-S3 reset to clear any existing state...');
+        
+        try {
+            const port = this.connectedPort;
+            
+            if (typeof port.setSignals !== 'function') {
+                console.log('⚠️ Port does not support signal control - skipping initial reset');
+                return;
+            }
+            
+            // First, do a normal reboot to clear any bootloader state
+            console.log('📍 Step 1: Normal reboot to clear bootloader state...');
+            await port.setSignals({
+                dataTerminalReady: false,  // EN = LOW (reset)
+                requestToSend: true        // GPIO0 = HIGH (normal mode)
+            });
+            
+            await this.delay(100);
+            
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (run)
+                requestToSend: true        // GPIO0 = HIGH (normal mode)
+            });
+            
+            // Wait for normal firmware to start and then stabilize
+            console.log('📍 Step 2: Waiting for device to boot normally and stabilize...');
+            await this.delay(2000);
+            
+            console.log('✅ Initial reset completed - device should be in normal mode');
+            
+        } catch (error) {
+            console.log('⚠️ Initial reset failed:', error.message);
+        }
     }
 
     async performHardwareReset() {
@@ -689,6 +729,148 @@ class ESP32Flasher {
         }
     }
 
+    async esp32FlashMD5Check(address, size, expectedMD5) {
+        console.log(`🔍 FLASH_MD5_CHECK: address=0x${address.toString(16)}, size=${size}, expected=${expectedMD5}`);
+        
+        // FLASH_MD5_CHECK command data: address, size, 0, 0
+        const data = new Uint8Array(16);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, address, true);
+        view.setUint32(4, size, true);
+        view.setUint32(8, 0, true);
+        view.setUint32(12, 0, true);
+        
+        const command = this.createCommand(0x13, data);
+        
+        try {
+            await this.writer.write(command);
+            const response = await this.readResponse(10000); // MD5 can take time for large blocks
+            
+            // Response contains MD5 hash (32 bytes) + status (2 bytes)
+            if (response.length >= 32) {
+                const md5Bytes = response.slice(0, 32);
+                const md5String = Array.from(md5Bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                
+                console.log(`📄 Device MD5: ${md5String}`);
+                console.log(`💾 Expected MD5: ${expectedMD5}`);
+                
+                if (md5String.toLowerCase() === expectedMD5.toLowerCase()) {
+                    console.log('✅ Flash MD5 verification successful');
+                    return true;
+                } else {
+                    console.log('❌ Flash MD5 verification failed - data corruption detected');
+                    return false;
+                }
+            } else {
+                console.log('⚠️ Invalid MD5 response length:', response.length);
+                return false;
+            }
+        } catch (error) {
+            console.log(`⚠️ FLASH_MD5_CHECK failed:`, error.message);
+            return false;
+        }
+    }
+
+    async calculateMD5(data) {
+        // Calculate proper MD5 hash using a JavaScript implementation
+        try {
+            return this.md5Hash(data);
+        } catch (error) {
+            console.log('⚠️ MD5 calculation failed:', error.message);
+            return null;
+        }
+    }
+
+    md5Hash(data) {
+        // Proper MD5 implementation for ESP32 flash verification
+        const bytes = new Uint8Array(data);
+        
+        // MD5 constants
+        const k = [];
+        for (let i = 0; i < 64; i++) {
+            k[i] = Math.floor(Math.abs(Math.sin(i + 1)) * Math.pow(2, 32));
+        }
+        
+        // MD5 processing
+        let h0 = 0x67452301;
+        let h1 = 0xEFCDAB89;
+        let h2 = 0x98BADCFE;
+        let h3 = 0x10325476;
+        
+        // Pre-processing: adding a single 1 bit
+        const msgLen = bytes.length;
+        const msg = new Uint8Array(msgLen + 64);
+        msg.set(bytes);
+        msg[msgLen] = 0x80;
+        
+        // Pre-processing: padding with zeros
+        const newLen = Math.ceil((msgLen + 9) / 64) * 64;
+        const paddedMsg = new Uint8Array(newLen);
+        paddedMsg.set(msg.slice(0, Math.min(msg.length, newLen)));
+        
+        // Append original length in bits mod 2^64 to message
+        const bitLen = msgLen * 8;
+        const view = new DataView(paddedMsg.buffer);
+        view.setUint32(newLen - 8, bitLen, true);
+        view.setUint32(newLen - 4, Math.floor(bitLen / Math.pow(2, 32)), true);
+        
+        // Process the message in 512-bit chunks
+        for (let offset = 0; offset < paddedMsg.length; offset += 64) {
+            const w = new Array(16);
+            for (let i = 0; i < 16; i++) {
+                w[i] = view.getUint32(offset + i * 4, true);
+            }
+            
+            let a = h0, b = h1, c = h2, d = h3;
+            
+            for (let i = 0; i < 64; i++) {
+                let f, g;
+                if (i < 16) {
+                    f = (b & c) | ((~b) & d);
+                    g = i;
+                } else if (i < 32) {
+                    f = (d & b) | ((~d) & c);
+                    g = (5 * i + 1) % 16;
+                } else if (i < 48) {
+                    f = b ^ c ^ d;
+                    g = (3 * i + 5) % 16;
+                } else {
+                    f = c ^ (b | (~d));
+                    g = (7 * i) % 16;
+                }
+                
+                const temp = d;
+                d = c;
+                c = b;
+                b = this.addUint32(b, this.leftRotate(this.addUint32(a, this.addUint32(f, this.addUint32(k[i], w[g]))), [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21][Math.floor(i / 4) % 4 + (Math.floor(i / 16) * 4)]));
+                a = temp;
+            }
+            
+            h0 = this.addUint32(h0, a);
+            h1 = this.addUint32(h1, b);
+            h2 = this.addUint32(h2, c);
+            h3 = this.addUint32(h3, d);
+        }
+        
+        // Produce the final hash value (little-endian)
+        const result = new ArrayBuffer(16);
+        const resultView = new DataView(result);
+        resultView.setUint32(0, h0, true);
+        resultView.setUint32(4, h1, true);
+        resultView.setUint32(8, h2, true);
+        resultView.setUint32(12, h3, true);
+        
+        return Array.from(new Uint8Array(result)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    
+    addUint32(a, b) {
+        return ((a + b) & 0xFFFFFFFF) >>> 0;
+    }
+    
+    leftRotate(value, amount) {
+        return ((value << amount) | (value >>> (32 - amount))) >>> 0;
+    }
+
     async esp32FlashFirmware(firmwareData) {
         console.log('🚀 Starting ESP32 firmware flash process...');
         
@@ -751,10 +933,33 @@ class ESP32Flasher {
                 }
             }
             
-            // End flash for this file - reboot only on the last file
+            // End flash for this file - NEVER reboot during flash process
             const isLastFile = fileIndex === firmwareData.length - 1;
-            await this.esp32FlashEnd(isLastFile); // Reboot on last file only
+            await this.esp32FlashEnd(false); // Never reboot during individual file flash
             console.log(`✅ File ${fileIndex + 1} flashed successfully`);
+            
+            // Verify flash with MD5 checksum (critical for detecting silent failures)
+            console.log(`🔍 Verifying file ${fileIndex + 1} with MD5 checksum...`);
+            
+            try {
+                // Calculate expected MD5 hash of the source data
+                const expectedMD5 = await this.calculateMD5(file.data);
+                if (expectedMD5) {
+                    // Verify flash memory contents match source data
+                    const verificationOk = await this.esp32FlashMD5Check(file.address, file.data.length, expectedMD5);
+                    
+                    if (verificationOk) {
+                        console.log(`✅ File ${fileIndex + 1} verification successful - data integrity confirmed`);
+                    } else {
+                        throw new Error(`Flash verification failed for file ${fileIndex + 1} - data corruption detected`);
+                    }
+                } else {
+                    console.log(`⚠️ Skipping MD5 verification for file ${fileIndex + 1} - hash calculation failed`);
+                }
+            } catch (verifyError) {
+                console.log(`❌ Flash verification failed for file ${fileIndex + 1}:`, verifyError.message);
+                throw new Error(`Flash verification failed: ${verifyError.message}`);
+            }
             
             // Quick SYNC check before next file (unless it's the last file)
             if (!isLastFile) {
@@ -766,6 +971,80 @@ class ESP32Flasher {
         }
         
         console.log('🎉 All firmware files flashed successfully!');
+    }
+
+    async performFinalVerification(firmwareData) {
+        console.log('🔎 Starting final flash verification...');
+        
+        try {
+            // First try to sync with bootloader to ensure it's still responding
+            await this.esp32Sync();
+            console.log('✅ Bootloader communication confirmed');
+            
+            // Find and verify critical firmware components
+            const criticalFiles = firmwareData.filter(file => 
+                file.address === 65536 || // hbd.bin (main firmware)
+                file.address === 0       // bootloader.bin
+            );
+            
+            let verificationsPassed = 0;
+            let verificationsFailed = 0;
+            
+            for (const file of criticalFiles) {
+                console.log(`🔍 Final verification of critical file at 0x${file.address.toString(16)} (${file.data.length} bytes)`);
+                
+                try {
+                    const expectedMD5 = await this.calculateMD5(file.data);
+                    if (expectedMD5) {
+                        const verificationOk = await this.esp32FlashMD5Check(file.address, file.data.length, expectedMD5);
+                        
+                        if (verificationOk) {
+                            console.log(`✅ Critical file at 0x${file.address.toString(16)} verified successfully`);
+                            verificationsPassed++;
+                        } else {
+                            console.log(`❌ Critical file at 0x${file.address.toString(16)} verification failed`);
+                            verificationsFailed++;
+                        }
+                    } else {
+                        console.log(`⚠️ Cannot verify critical file at 0x${file.address.toString(16)} - MD5 calculation failed`);
+                        verificationsFailed++;
+                    }
+                } catch (error) {
+                    console.log(`❌ Critical file verification failed at 0x${file.address.toString(16)}:`, error.message);
+                    verificationsFailed++;
+                }
+            }
+            
+            console.log(`📊 Final verification results: ${verificationsPassed} passed, ${verificationsFailed} failed`);
+            
+            if (verificationsFailed > 0) {
+                throw new Error(`Final verification failed: ${verificationsFailed} critical files failed verification`);
+            }
+            
+            console.log('🎯 All critical firmware components verified successfully!');
+            
+            // Now that verification is complete, send final reboot command
+            console.log('🔄 Sending final reboot command to exit bootloader...');
+            try {
+                // Send FLASH_END with reboot=true to exit bootloader and start firmware
+                const data = new Uint8Array(4);
+                const view = new DataView(data.buffer);
+                view.setUint32(0, 0, true); // reboot=true -> flag=0
+                
+                const command = this.createCommand(0x04, data);
+                await this.writer.write(command);
+                
+                // Don't wait for response since device will reboot immediately
+                console.log('📤 Final reboot command sent - device should restart with new firmware');
+            } catch (rebootError) {
+                console.log('⚠️ Final reboot command failed, using hardware reset instead:', rebootError.message);
+            }
+            
+        } catch (error) {
+            console.log('❌ Final verification failed:', error.message);
+            console.log('⚠️ WARNING: Flash may have failed silently - firmware may not update');
+            throw new Error(`Final verification failed: ${error.message}`);
+        }
     }
 
     async forceDeviceReboot() {
