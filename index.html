@@ -5,34 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Humly Booking Device Flasher - Simple & Professional</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Try different esptool-js version that might work better with ESP32-S3 -->
-    <script type="module">
-        try {
-            // Try older, more stable version
-            const module = await import('https://cdn.skypack.dev/esptool-js@0.3.1');
-            window.esptoolPackage = {
-                Transport: module.Transport,
-                ESPLoader: module.ESPLoader
-            };
-            console.log('esptool-js v0.3.1 loaded:', window.esptoolPackage);
-        } catch (error) {
-            console.error('Failed to load esptool-js v0.3.1:', error);
-            // Try even older version as backup
-            try {
-                const module2 = await import('https://unpkg.com/esptool-js@0.2.0/dist/index.js');
-                window.esptoolPackage = {
-                    Transport: module2.Transport,
-                    ESPLoader: module2.ESPLoader
-                };
-                console.log('esptool-js v0.2.0 loaded as backup:', window.esptoolPackage);
-            } catch (error2) {
-                console.error('All esptool-js versions failed:', error2);
-            }
-        }
-        
-        window.esptoolReady = true;
-        window.dispatchEvent(new CustomEvent('esptool-ready'));
-    </script>
+    <!-- ESP Web Tools for browser-based flashing -->
+    <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
 </head>
 <body>
     <div class="container">
