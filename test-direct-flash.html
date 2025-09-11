@@ -22,12 +22,25 @@
       if (installButton) {
         installButton.addEventListener('state-changed', (event) => {
           log(`ESP Web Tools state: ${event.detail.state}`);
+          if (event.detail.message) {
+            log(`ESP Web Tools message: ${event.detail.message}`);
+          }
         });
         
         installButton.addEventListener('error', (event) => {
           log(`ESP Web Tools error: ${event.detail.error}`, 'error');
+          log('💡 Troubleshooting tips:', 'warn');
+          log('- Close any other programs using the serial port (Arduino IDE, PlatformIO, etc.)');
+          log('- Try unplugging and reconnecting the device');
+          log('- Make sure device is not in use by another browser tab');
+          log('- Try restarting the browser');
           // Show fallback button on error
           fallbackButton.style.display = 'block';
+        });
+        
+        // Add more detailed event logging
+        installButton.addEventListener('progress', (event) => {
+          log(`Progress: ${event.detail.message || event.detail.state}`);
         });
       }
     });
