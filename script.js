@@ -2,6 +2,8 @@
 // Matches Windows flasher parameters exactly: --before default_reset --after hard_reset --no-stub
 // Flash parameters: --flash_mode dio --flash_freq 80m --flash_size 16MB
 // Version: 2025-01-10-v3 - Professional esptool-js integration
+// CHECKSUM FIX: 2025-09-11 @ 18:45 - Fixed FLASH_DATA checksum calculation
+console.log('🔧 ESP32 Flasher script loaded with FLASH_DATA checksum fix (2025-09-11 @ 18:45)');
 
 class ESP32Flasher {
     constructor() {
@@ -1248,7 +1250,13 @@ class ESP32Flasher {
         
         // Use custom data for checksum calculation if provided, otherwise use full data
         const dataForChecksum = checksumData || data;
-        view.setUint32(4, this.calculateChecksum(dataForChecksum), true); // Checksum
+        const calculatedChecksum = this.calculateChecksum(dataForChecksum);
+        view.setUint32(4, calculatedChecksum, true); // Checksum
+        
+        // DEBUG: Log checksum fix is active
+        if (cmd === 0x03 && checksumData) {
+            console.log(`🔧 CHECKSUM FIX ACTIVE: Using custom checksum 0x${calculatedChecksum.toString(16)} for ${checksumData.length} bytes (not ${data.length} bytes)`);
+        }
         
         // Copy data
         if (data.length > 0) {
@@ -1532,6 +1540,18 @@ class ESP32Flasher {
         // According to esptool docs, checksum should ONLY apply to actual data payload
         const command = this.createCommandWithCustomChecksum(0x03, payload, data);
         
+        // DEBUG: Log detailed packet information for first chunk
+        if (sequence === 0) {
+            const checksumOnData = this.calculateChecksum(data);
+            const checksumOnPayload = this.calculateChecksum(payload);
+            console.log(`📋 FLASH_DATA Packet Debug (seq=${sequence}):`);
+            console.log(`   • Payload size: ${payload.length} bytes (header 16 + data ${data.length})`);
+            console.log(`   • Checksum on data only: 0x${checksumOnData.toString(16)}`);
+            console.log(`   • Checksum on full payload: 0x${checksumOnPayload.toString(16)}`);
+            console.log(`   • First 4 data bytes: [${Array.from(data.slice(0, 4)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ')}]`);
+            console.log(`   • Command packet size: ${command.length} bytes (SLIP encoded)`);
+        }
+        
         // Enhanced retry logic with progressive fallback (esptool-style)
         const WRITE_BLOCK_ATTEMPTS = 3;
         let timeout = this.getEsptoolTimeout('FLASH_DATA', 1, totalFileSize);
@@ -1539,7 +1559,20 @@ class ESP32Flasher {
         for (let attempt = 0; attempt < WRITE_BLOCK_ATTEMPTS; attempt++) {
             try {
                 await this.writer.write(command);
-                const response = await this.readResponse(timeout);
+                
+                // DEBUG: Use shorter timeout for first chunk to detect immediate failures
+                const debugTimeout = (sequence === 0) ? 5000 : timeout; // 5 seconds for first chunk
+                if (sequence === 0) {
+                    console.log(`⏱️ Using debug timeout: ${debugTimeout}ms for first FLASH_DATA chunk`);
+                }
+                
+                const response = await this.readResponse(debugTimeout);
+                
+                // DEBUG: Log successful response for first chunk
+                if (sequence === 0) {
+                    console.log(`✅ FLASH_DATA chunk ${sequence} successful! Response: ${response.length} bytes`);
+                }
+                
                 return response;
             } catch (error) {
                 console.log(`⚠️ FLASH_DATA attempt ${attempt + 1} failed (seq=${sequence}):`, error.message);
