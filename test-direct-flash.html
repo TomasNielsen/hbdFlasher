@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HBD ESP32-S3 Direct Flasher</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f8f9fa;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      background: white;
+      padding: 2rem;
+      border-radius: 1rem;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      max-width: 600px;
+      width: 100%;
+    }
+    h1 {
+      margin-top: 0;
+      color: #2c3e50;
+      text-align: center;
+    }
+    .subtitle {
+      color: #7f8c8d;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .firmware-info {
+      background: #e8f4f8;
+      border: 1px solid #3498db;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    esp-web-install-button {
+      display: block;
+      width: 100%;
+      margin: 1.5rem auto;
+      background: #3498db;
+      color: white;
+      padding: 1rem 2rem;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-align: center;
+    }
+    esp-web-install-button:hover {
+      background: #2980b9;
+      transform: translateY(-2px);
+    }
+    .log {
+      margin-top: 1.5rem;
+      background: #2c3e50;
+      color: #ecf0f1;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.8rem;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+    .comparison-links {
+      text-align: center;
+      margin-top: 1rem;
+    }
+    .comparison-links a {
+      color: #3498db;
+      text-decoration: none;
+      margin: 0 10px;
+      font-size: 0.9rem;
+    }
+    .comparison-links a:hover {
+      text-decoration: underline;
+    }
+    .warning {
+      background: #fef9e7;
+      border: 1px solid #f39c12;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🚀 HBD ESP32-S3 Direct Flasher</h1>
+    <p class="subtitle">Secure Boot Compatible - No Dialogs Approach</p>
+
+    <div class="firmware-info">
+      <strong>Firmware Details:</strong><br>
+      • Version: v1.36.0.16433<br>
+      • Target: ESP32-S3 with Secure Boot<br>
+      • Mode: Direct flash without dialogs<br>
+      • Improv Wi-Fi: Disabled for secure boot compatibility
+    </div>
+
+    <div class="warning">
+      <strong>⚠️ Requirements:</strong><br>
+      • Chrome or Edge browser with HTTPS<br>
+      • ESP32-S3 device in download mode<br>
+      • Device must be connected via USB-C
+    </div>
+
+    <esp-web-install-button id="flashBtn">Connect & Flash Firmware</esp-web-install-button>
+    
+    <div class="comparison-links">
+      <a href="test-esp-web-tools.html">← Dialog Version</a> | 
+      <a href="index.html">← Main Flasher</a>
+    </div>
+    
+    <div class="log" id="log"></div>
+  </div>
+
+  <script type="module">
+    // Inline manifest (no extra dialogs, no firmware picker)
+    const manifest = {
+      name: "HBD ESP32-S3 Firmware v1.36.0.16433",
+      builds: [
+        {
+          chipFamily: "ESP32-S3",
+          parts: [
+            // Using correct decimal offsets for ESP Web Tools
+            { path: "./firmware/v1.36.0.16433/partition_table/partition-table.bin", offset: 40960 },
+            { path: "./firmware/v1.36.0.16433/hbd.bin", offset: 65536 },
+            { path: "./firmware/v1.36.0.16433/ota_data_initial.bin", offset: 9502720 },
+            { path: "./firmware/v1.36.0.16433/phy_init_data.bin", offset: 9506816 },
+            { path: "./firmware/v1.36.0.16433/assets.bin", offset: 9515008 }
+          ]
+        }
+      ]
+    };
+
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      // Attach manifest directly to the button
+      const button = document.getElementById("flashBtn");
+      button.manifest = manifest;
+      button.setAttribute("improv-wifi", "false"); // disable Improv Wi-Fi to avoid secure boot errors
+
+      // Enhanced logging
+      const logBox = document.getElementById("log");
+      function log(msg, type = 'info') {
+        const ts = new Date().toLocaleTimeString();
+        const prefix = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : '📋';
+        logBox.textContent += `[${ts}] ${prefix} ${msg}\n`;
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+
+      // Log initialization
+      log('🔧 Direct ESP Web Tools flasher initialized');
+      log('📋 Firmware: HBD v1.36.0.16433 for ESP32-S3');
+      log('🔧 Mode: Direct flash, no dialogs, Improv disabled');
+      log('🌐 Ready for secure boot device connection');
+
+      // Event listeners for detailed logging
+      button.addEventListener("state-changed", e => {
+        const state = e.detail.state;
+        const message = e.detail.message || '';
+        log(`State: ${state} ${message}`);
+        
+        // Log important state changes
+        if (state === 'CONNECTED') {
+          log('✅ Device connected successfully');
+        } else if (state === 'INSTALLING') {
+          log('🚀 Starting firmware installation...');
+        } else if (state === 'INSTALLED') {
+          log('✅ Firmware installation completed!');
+        }
+      });
+      
+      button.addEventListener("error", e => {
+        log(`Error: ${e.detail.error}`, 'error');
+      });
+
+      // Override console for additional logging
+      const originalLog = console.log;
+      const originalError = console.error;
+      
+      console.log = (...args) => {
+        originalLog(...args);
+        log(`Console: ${args.join(' ')}`);
+      };
+      
+      console.error = (...args) => {
+        originalError(...args);
+        log(`Console Error: ${args.join(' ')}`, 'error');
+      };
+    });
+  </script>
+</body>
+</html>
