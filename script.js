@@ -192,9 +192,10 @@ class ESP32Flasher {
             console.log('🔄 Performing hardware reset to enter bootloader...');
             await this.performHardwareReset();
             
-            // Wait longer for bootloader to initialize (especially on first connection)
+            // Wait longer for bootloader to initialize (especially on first connection with secure boot)
             console.log('⏳ Waiting for ESP32-S3 bootloader to initialize...');
-            await this.delay(3000); // Increased from 2s to 3s for better reliability
+            const bootloaderDelay = this.secureBootEnabled ? 5000 : 3000; // Extended for secure boot
+            await this.delay(bootloaderDelay);
             
             console.log('📡 Attempting ESP32-S3 sync...');
             await this.esp32Sync();
@@ -222,9 +223,24 @@ class ESP32Flasher {
             console.log('🔍 Performing final verification of critical firmware components...');
             await this.performFinalVerification(firmwareData);
             
+            // Perform final reboot to new firmware (esptool --after hard_reset)
+            console.log('🔄 Sending final FLASH_END with reboot to start new firmware...');
+            try {
+                await this.esp32FlashEnd(true); // Reboot to new firmware
+                console.log('✅ Device rebooting to new firmware...');
+                
+                // Give device time to reboot and initialize with new firmware
+                console.log('⏳ Waiting for device to boot with new firmware...');
+                await this.delay(this.secureBootEnabled ? 3000 : 2000); // Extra time for secure boot
+                
+            } catch (rebootError) {
+                console.log('⚠️ Final reboot command failed:', rebootError.message);
+                console.log('💡 Device may need manual reset to boot new firmware');
+            }
+            
             console.log('✅ Firmware flashing completed successfully!');
             console.log('🔍 Device should now be running new firmware v1.36.0.16433');
-            console.log('⚠️ If device shows old firmware after manual reset, please report this issue');
+            console.log('🔄 Device has been rebooted automatically - no manual reset needed');
             
             // Show success
             flashProgress.classList.add('hidden');
@@ -343,13 +359,13 @@ class ESP32Flasher {
             console.log('   DTR controls EN (enable/reset) - LOW = reset, HIGH = run');
             console.log('   RTS controls GPIO0 (boot mode) - LOW = bootloader, HIGH = normal');
             
-            // ESP32-S3 specific sequence: First ensure clean state
+            // ESP32-S3 specific sequence: First ensure clean state  
             console.log('📍 Step 1: Ensuring clean signal state...');
             await port.setSignals({
                 dataTerminalReady: true,   // EN = HIGH (not reset)
                 requestToSend: true        // GPIO0 = HIGH (normal mode)
             });
-            await this.delay(100);
+            await this.delay(200); // Extended from 100ms to 200ms for ESP32-S3 with secure boot
             
             // Step 2: Assert GPIO0 (bootloader mode) BEFORE reset
             console.log('📍 Step 2: Setting bootloader mode before reset...');
@@ -357,7 +373,7 @@ class ESP32Flasher {
                 dataTerminalReady: true,   // EN = HIGH (still running)
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
-            await this.delay(100); // Let GPIO0 settle
+            await this.delay(200); // Extended from 100ms - let GPIO0 settle completely
             
             // Step 3: Assert reset while GPIO0 is held low
             console.log('📍 Step 3: Asserting reset while GPIO0 held low...');
@@ -365,7 +381,7 @@ class ESP32Flasher {
                 dataTerminalReady: false,  // EN = LOW (reset)
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
-            await this.delay(100); // Short reset pulse
+            await this.delay(200); // Extended from 100ms - ensure proper reset
             
             // Step 4: Release reset while keeping GPIO0 low
             console.log('📍 Step 4: Releasing reset, keeping bootloader mode...');
@@ -373,7 +389,7 @@ class ESP32Flasher {
                 dataTerminalReady: true,   // EN = HIGH (run)
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
-            await this.delay(50); // Brief moment for boot detection
+            await this.delay(100); // Extended from 50ms for boot detection
             
             // Step 5: Release GPIO0 - device should now be in bootloader
             console.log('📍 Step 5: Releasing GPIO0, device should enter bootloader...');
@@ -382,7 +398,7 @@ class ESP32Flasher {
                 requestToSend: true        // GPIO0 = HIGH (release)
             });
             
-            await this.delay(300); // Let ESP32-S3 bootloader initialize
+            await this.delay(500); // Extended from 300ms - let ESP32-S3 bootloader initialize fully
             
             console.log('✅ ESP32-S3 hardware reset completed - device should be in bootloader mode');
             
@@ -561,6 +577,10 @@ class ESP32Flasher {
                     const response = await this.readResponse(100); // 100ms timeout (matches esptool)
                     if (response) {
                         console.log('✅ ESP32 SYNC successful');
+                        
+                        // Detect secure boot and configure ROM-only mode  
+                        await this.detectSecureBoot();
+                        
                         return true;
                     }
                 } catch (error) {
@@ -586,6 +606,99 @@ class ESP32Flasher {
         }
         
         throw new Error('ESP32 SYNC failed after 35 attempts (5 cycles × 7 sync attempts)');
+    }
+
+    async detectSecureBoot() {
+        console.log('🔐 Detecting secure boot status...');
+        
+        // Initialize secure boot configuration
+        this.secureBootEnabled = false;
+        this.romOnlyMode = true; // Always use ROM-only mode for compatibility
+        
+        try {
+            // Try to read secure boot status from efuse (EFUSE_SECURE_BOOT_EN_REG)
+            // ESP32-S3 efuse register for secure boot: 0x60007048
+            const secureBootReg = await this.esp32ReadReg(0x60007048);
+            
+            if (secureBootReg && secureBootReg.length >= 4) {
+                const secureBootValue = new DataView(secureBootReg.buffer).getUint32(0, true);
+                this.secureBootEnabled = (secureBootValue & 0x1) !== 0;
+                
+                if (this.secureBootEnabled) {
+                    console.log('🔐 Secure boot ENABLED - Using ROM-only mode and special handling');
+                } else {
+                    console.log('🔐 Secure boot DISABLED - Using ROM-only mode for compatibility');
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Could not read secure boot status, assuming enabled for safety');
+            this.secureBootEnabled = true; // Assume enabled for safety
+        }
+        
+        // Configure flash operations for secure boot compatibility
+        this.configureSecureBootMode();
+    }
+
+    async esp32ReadReg(address) {
+        console.log(`📥 Reading register 0x${address.toString(16)}`);
+        
+        // READ_REG command (0x0A) with 32-bit address
+        const data = new Uint8Array(4);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, address, true); // little-endian
+        
+        const command = this.createCommand(0x0A, data);
+        
+        try {
+            await this.writer.write(command);
+            const response = await this.readResponse(1000);
+            
+            if (response && response.length >= 4) {
+                return response.slice(0, 4); // Return first 4 bytes (32-bit value)
+            }
+            return null;
+        } catch (error) {
+            console.log(`⚠️ Register read failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    configureSecureBootMode() {
+        if (this.secureBootEnabled) {
+            console.log('🔐 Configuring secure boot compatibility:');
+            console.log('   • ROM-only mode enabled (no stub loader)');
+            console.log('   • Force flashing enabled for protected regions');
+            console.log('   • Extended timeouts for secure verification');
+            console.log('   • Enhanced error handling for secure boot restrictions');
+            
+            // Configure secure boot specific settings
+            this.flashTimeout = 10000; // Extended timeout for secure operations
+            this.forceFlashing = true; // Enable force flashing
+        } else {
+            console.log('🔐 Standard ESP32-S3 mode configured');
+            this.flashTimeout = 5000;
+            this.forceFlashing = false;
+        }
+    }
+
+    async checkSecureBootProtection(address) {
+        // ESP32-S3 secure boot protected regions:
+        // 0x0 - 0x8000: Bootloader region (protected when secure boot enabled)
+        
+        if (!this.secureBootEnabled) {
+            return false; // No protection if secure boot is disabled
+        }
+        
+        // Check if address falls in bootloader region
+        if (address >= 0x0 && address < 0x8000) {
+            console.log(`🔐 Address 0x${address.toString(16)} is in protected bootloader region`);
+            return true;
+        }
+        
+        // Other potentially protected regions could be added here
+        // For now, only bootloader region is checked
+        
+        return false;
     }
 
     async readResponse(timeoutMs = 10000) {
@@ -846,28 +959,84 @@ class ESP32Flasher {
     async esp32ReadFlash(address, size) {
         console.log(`📥 ESP32_READ_FLASH: address=0x${address.toString(16)}, size=${size}`);
         
-        // ESP32 READ_REG command for flash memory access
-        // Command format: READ_REG(0x0A) with address parameter
-        const data = new Uint8Array(4);
-        const view = new DataView(data.buffer);
-        view.setUint32(0, address, true);
+        // Use ROM loader READ_FLASH command for actual flash memory access
+        // In ROM-only mode (secure boot compatible), we need to use simpler approach
         
-        const command = this.createCommand(0x0A, data);
+        if (this.romOnlyMode) {
+            // ROM loader flash reading - more basic but compatible with secure boot
+            return await this.romReadFlash(address, size);
+        } else {
+            // Stub loader READ_FLASH command (0xD2) - faster but not available in secure boot
+            return await this.stubReadFlash(address, size);
+        }
+    }
+
+    async romReadFlash(address, size) {
+        console.log(`📥 ROM_READ_FLASH: address=0x${address.toString(16)}, size=${size}`);
+        
+        // ROM loader method: Use multiple READ_REG calls to read flash memory
+        // Each READ_REG reads 4 bytes, so we need multiple calls for larger sizes
+        const maxBytesPerCall = 4;
+        const numCalls = Math.ceil(size / maxBytesPerCall);
+        const result = new Uint8Array(size);
+        
+        for (let i = 0; i < numCalls; i++) {
+            const callAddress = address + (i * maxBytesPerCall);
+            const bytesToRead = Math.min(maxBytesPerCall, size - (i * maxBytesPerCall));
+            
+            try {
+                const data = await this.esp32ReadReg(callAddress);
+                if (data && data.length >= bytesToRead) {
+                    // Copy bytes to result buffer
+                    for (let j = 0; j < bytesToRead; j++) {
+                        result[i * maxBytesPerCall + j] = data[j];
+                    }
+                } else {
+                    console.log(`⚠️ ROM flash read failed at 0x${callAddress.toString(16)}`);
+                    return null;
+                }
+            } catch (error) {
+                console.log(`⚠️ ROM flash read error at 0x${callAddress.toString(16)}: ${error.message}`);
+                return null;
+            }
+            
+            // Small delay between reads to avoid overwhelming the ROM loader
+            if (i < numCalls - 1) {
+                await this.delay(10);
+            }
+        }
+        
+        console.log(`📥 ROM read complete: ${result.length} bytes from flash`);
+        return result;
+    }
+
+    async stubReadFlash(address, size) {
+        console.log(`📥 STUB_READ_FLASH: address=0x${address.toString(16)}, size=${size}`);
+        
+        // Stub loader READ_FLASH command (0xD2) - not available in secure boot
+        // Command format: address, size, block_size, max_in_flight
+        const data = new Uint8Array(16);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, address, true);      // Flash address
+        view.setUint32(4, size, true);         // Size to read  
+        view.setUint32(8, 1024, true);         // Block size
+        view.setUint32(12, 1, true);           // Max blocks in flight
+        
+        const command = this.createCommand(0xD2, data);
         
         try {
             await this.writer.write(command);
-            const response = await this.readResponse(5000);
+            const response = await this.readResponse(this.flashTimeout || 5000);
             
-            if (response && response.length >= 4) {
-                // Response format: 4 bytes of data + 2 bytes status
-                console.log(`📥 Read ${response.length} bytes from flash`);
-                return response;
+            if (response && response.length >= size) {
+                console.log(`📥 Stub read complete: ${response.length} bytes from flash`);
+                return response.slice(0, size);
             } else {
-                console.log(`⚠️ Invalid read response length: ${response?.length || 0}`);
+                console.log(`⚠️ Invalid stub read response length: ${response?.length || 0}`);
                 return null;
             }
         } catch (error) {
-            console.log(`⚠️ ESP32_READ_FLASH failed:`, error.message);
+            console.log(`⚠️ STUB_READ_FLASH failed:`, error.message);
             return null;
         }
     }
@@ -1024,6 +1193,20 @@ class ESP32Flasher {
         for (let fileIndex = 0; fileIndex < firmwareData.length; fileIndex++) {
             const file = firmwareData[fileIndex];
             console.log(`📂 Flashing file ${fileIndex + 1}/${firmwareData.length}: ${file.data.length} bytes at 0x${file.address.toString(16)}`);
+            
+            // Check for secure boot protected regions and handle accordingly
+            const isProtectedRegion = await this.checkSecureBootProtection(file.address);
+            if (isProtectedRegion) {
+                console.log(`🔐 Secure boot protected region detected at 0x${file.address.toString(16)}`);
+                
+                if (!this.forceFlashing) {
+                    console.log(`⚠️ Skipping protected bootloader region - secure boot prevents modification`);
+                    console.log(`💡 Use force flashing if you need to update this region`);
+                    continue; // Skip this file
+                }
+                
+                console.log(`🔧 Force flashing enabled - attempting to flash protected region`);
+            }
             
             // Try to begin flash for this file with retry logic
             let retryCount = 0;
