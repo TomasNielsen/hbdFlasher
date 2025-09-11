@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HBD Device Console - Humly</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2rem;
+            font-weight: 300;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #7f8c8d;
+            font-size: 1rem;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #95a5a6;
+        }
+
+        .status-bar.connected {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+
+        .status-bar.error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+        }
+
+        .status-text {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #95a5a6;
+        }
+
+        .status-indicator.connected {
+            background: #28a745;
+        }
+
+        .status-indicator.error {
+            background: #dc3545;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn:disabled:hover {
+            transform: none;
+        }
+
+        .output-section {
+            margin-top: 1.5rem;
+        }
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .output-header h3 {
+            color: #2c3e50;
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        .clear-btn {
+            background: none;
+            border: none;
+            color: #95a5a6;
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: all 0.3s;
+        }
+
+        .clear-btn:hover {
+            background: #ecf0f1;
+            color: #7f8c8d;
+        }
+
+        .console-output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            min-height: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .console-output:empty::before {
+            content: "Console output will appear here...";
+            color: #7f8c8d;
+            font-style: italic;
+        }
+
+        .timestamp {
+            color: #95a5a6;
+            margin-right: 0.5rem;
+        }
+
+        .command {
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        .response {
+            color: #2ecc71;
+        }
+
+        .error {
+            color: #e74c3c;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .requirements {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+        }
+
+        .requirements h4 {
+            color: #856404;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .requirements ul {
+            color: #856404;
+            margin-left: 1.2rem;
+        }
+
+        .requirements li {
+            margin-bottom: 0.3rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>HBD Device Console</h1>
+            <p>Connect and communicate with Humly Booking Devices</p>
+        </div>
+
+        <div class="status-bar" id="statusBar">
+            <div class="status-text">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Not connected</span>
+            </div>
+            <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()">
+                Connect Device
+            </button>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-secondary" id="timeBtn" onclick="getTime()" disabled>
+                📅 Get Current Time
+            </button>
+            <button class="btn btn-secondary" id="timezoneBtn" onclick="getTimezone()" disabled>
+                🌍 Get Timezone
+            </button>
+        </div>
+
+        <div class="output-section">
+            <div class="output-header">
+                <h3>Console Output</h3>
+                <button class="clear-btn" onclick="clearOutput()">Clear</button>
+            </div>
+            <div class="console-output" id="consoleOutput"></div>
+        </div>
+
+        <div class="requirements">
+            <h4>📋 Requirements</h4>
+            <ul>
+                <li>Chrome or Edge browser (Web Serial API support)</li>
+                <li>HTTPS connection (required for serial port access)</li>
+                <li>HBD device connected via USB-C cable</li>
+                <li>Device drivers installed and working</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let serialPort = null;
+        let isConnected = false;
+        let reader = null;
+        let writer = null;
+
+        // UI elements
+        const statusBar = document.getElementById('statusBar');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const connectBtn = document.getElementById('connectBtn');
+        const timeBtn = document.getElementById('timeBtn');
+        const timezoneBtn = document.getElementById('timezoneBtn');
+        const consoleOutput = document.getElementById('consoleOutput');
+
+        // Check if Web Serial API is supported
+        if (!('serial' in navigator)) {
+            updateStatus('error', 'Web Serial API not supported. Use Chrome or Edge browser.');
+            connectBtn.disabled = true;
+        }
+
+        // Auto-connect to previously granted devices on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            await autoConnectHBD();
+        });
+
+        // Auto-connect function
+        async function autoConnectHBD() {
+            if (!('serial' in navigator)) return;
+
+            try {
+                const ports = await navigator.serial.getPorts();
+                log('🔍 Found ' + ports.length + ' previously authorized ports');
+                
+                for (const port of ports) {
+                    const info = port.getInfo();
+                    // Check for ESP32-S3 (Espressif vendor ID)
+                    if (info.usbVendorId === 0x303a) {
+                        log('✅ Found HBD device, attempting auto-connection...');
+                        await connectToPort(port);
+                        return;
+                    }
+                }
+
+                if (ports.length === 0) {
+                    log('ℹ️ No previously authorized devices found. Click "Connect Device" to get started.');
+                }
+            } catch (error) {
+                log('❌ Auto-connect failed: ' + error.message, 'error');
+            }
+        }
+
+        // Toggle connection
+        async function toggleConnection() {
+            if (isConnected) {
+                await disconnectDevice();
+            } else {
+                await connectDevice();
+            }
+        }
+
+        // Connect to device
+        async function connectDevice() {
+            if (!('serial' in navigator)) {
+                log('❌ Web Serial API not supported', 'error');
+                return;
+            }
+
+            try {
+                updateConnectButton(true, 'Connecting...');
+                log('🔌 Requesting serial port access...');
+
+                // Request port with ESP32 filters
+                const port = await navigator.serial.requestPort({
+                    filters: [
+                        { usbVendorId: 0x303a }, // Espressif
+                        { usbVendorId: 0x10c4 }, // Silicon Labs (CP210x)
+                        { usbVendorId: 0x1a86 }  // QinHeng (CH340)
+                    ]
+                });
+
+                await connectToPort(port);
+            } catch (error) {
+                log('❌ Connection failed: ' + error.message, 'error');
+                updateStatus('error', 'Connection failed');
+                updateConnectButton(false, 'Connect Device');
+            }
+        }
+
+        // Connect to specific port
+        async function connectToPort(port) {
+            try {
+                await port.open({ 
+                    baudRate: 115200,
+                    dataBits: 8,
+                    stopBits: 1,
+                    parity: 'none'
+                });
+
+                serialPort = port;
+                reader = port.readable.getReader();
+                writer = port.writable.getWriter();
+
+                isConnected = true;
+                updateStatus('connected', 'Connected to HBD device');
+                updateConnectButton(false, 'Disconnect');
+                enableControls(true);
+
+                log('✅ Successfully connected to HBD device');
+                
+                // Start reading responses
+                readLoop();
+
+            } catch (error) {
+                log('❌ Failed to connect: ' + error.message, 'error');
+                updateStatus('error', 'Connection failed');
+                updateConnectButton(false, 'Connect Device');
+            }
+        }
+
+        // Disconnect device
+        async function disconnectDevice() {
+            try {
+                if (reader) {
+                    await reader.cancel();
+                    reader.releaseLock();
+                    reader = null;
+                }
+
+                if (writer) {
+                    writer.releaseLock();
+                    writer = null;
+                }
+
+                if (serialPort) {
+                    await serialPort.close();
+                    serialPort = null;
+                }
+
+                isConnected = false;
+                updateStatus('default', 'Not connected');
+                updateConnectButton(false, 'Connect Device');
+                enableControls(false);
+
+                log('📱 Disconnected from device');
+            } catch (error) {
+                log('❌ Disconnect error: ' + error.message, 'error');
+            }
+        }
+
+        // Read loop for incoming data
+        async function readLoop() {
+            try {
+                while (isConnected && reader) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const text = new TextDecoder().decode(value);
+                    // Process received data (you can expand this for command responses)
+                    if (text.trim()) {
+                        log('📨 ' + text.trim(), 'response');
+                    }
+                }
+            } catch (error) {
+                if (isConnected) {
+                    log('❌ Read error: ' + error.message, 'error');
+                }
+            }
+        }
+
+        // Send command to device
+        async function sendCommand(command) {
+            if (!isConnected || !writer) {
+                log('❌ Device not connected', 'error');
+                return;
+            }
+
+            try {
+                log('📤 ' + command, 'command');
+                const encoder = new TextEncoder();
+                await writer.write(encoder.encode(command + '\n'));
+            } catch (error) {
+                log('❌ Send error: ' + error.message, 'error');
+            }
+        }
+
+        // Get current time
+        async function getTime() {
+            await sendCommand('time_read');
+        }
+
+        // Get timezone
+        async function getTimezone() {
+            await sendCommand('timezone_read');
+        }
+
+        // Update connection status
+        function updateStatus(type, message) {
+            statusBar.className = 'status-bar ' + (type === 'default' ? '' : type);
+            statusIndicator.className = 'status-indicator ' + (type === 'default' ? '' : type);
+            statusText.textContent = message;
+        }
+
+        // Update connect button
+        function updateConnectButton(loading, text) {
+            if (loading) {
+                connectBtn.innerHTML = '<div class="loading"></div>' + text;
+                connectBtn.disabled = true;
+            } else {
+                connectBtn.innerHTML = text;
+                connectBtn.disabled = false;
+            }
+        }
+
+        // Enable/disable controls
+        function enableControls(enabled) {
+            timeBtn.disabled = !enabled;
+            timezoneBtn.disabled = !enabled;
+        }
+
+        // Log function
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const timestampSpan = '<span class="timestamp">[' + timestamp + ']</span>';
+            
+            let logClass = '';
+            let icon = '';
+            
+            if (type === 'command') {
+                logClass = 'command';
+                icon = '> ';
+            } else if (type === 'response') {
+                logClass = 'response';
+                icon = '< ';
+            } else if (type === 'error') {
+                logClass = 'error';
+                icon = '! ';
+            } else {
+                icon = '  ';
+            }
+
+            const logEntry = timestampSpan + '<span class="' + logClass + '">' + icon + message + '</span>\n';
+            consoleOutput.innerHTML += logEntry;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        // Clear output
+        function clearOutput() {
+            consoleOutput.innerHTML = '';
+        }
+
+        // Handle page unload
+        window.addEventListener('beforeunload', async () => {
+            if (isConnected) {
+                await disconnectDevice();
+            }
+        });
+    </script>
+</body>
+</html>
