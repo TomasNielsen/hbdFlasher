@@ -5,33 +5,32 @@
   <title>HBD ESP32-S3 Direct Flasher</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Use ESP Web Tools install button without importing flash directly -->
+  <!-- ESP Web Tools install button (handles all dependencies internally) -->
   <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
   
-  <!-- Import dependencies manually with full URLs -->
-  <script type="importmap">
-    {
-      "imports": {
-        "esptool-js": "https://unpkg.com/esptool-js@0.4.6/lib/index.js"
-      }
-    }
-  </script>
-  
   <script type="module">
-    try {
-      // Import esptool-js first to resolve ESP Web Tools dependency
-      const esptool = await import("https://unpkg.com/esptool-js@0.4.6/lib/index.js");
-      console.log('esptool-js loaded:', esptool);
+    // Simple initialization - no complex module loading
+    document.addEventListener('DOMContentLoaded', () => {
+      log('🔧 ESP Web Tools install button initialized');
+      log('📋 Using external manifest for secure boot compatibility');
+      log('🌐 Ready for device connection via install button');
       
-      // Now import ESP Web Tools flash function
-      const { flash } = await import("https://unpkg.com/esp-web-tools@9/dist/flash.js");
-      window.espWebToolsFlash = flash;
-      console.log('ESP Web Tools flash function loaded:', typeof flash);
-    } catch (error) {
-      console.error('Module loading failed:', error);
-      // Fallback: just use the install button approach instead
-      console.log('Using install button fallback approach');
-    }
+      // Show fallback button if needed
+      const installButton = document.querySelector('esp-web-install-button');
+      const fallbackButton = document.getElementById('flashBtn');
+      
+      if (installButton) {
+        installButton.addEventListener('state-changed', (event) => {
+          log(`ESP Web Tools state: ${event.detail.state}`);
+        });
+        
+        installButton.addEventListener('error', (event) => {
+          log(`ESP Web Tools error: ${event.detail.error}`, 'error');
+          // Show fallback button on error
+          fallbackButton.style.display = 'block';
+        });
+      }
+    });
   </script>
   <style>
     body {
@@ -151,7 +150,15 @@
       • Device must be connected via USB-C
     </div>
 
-    <button id="flashBtn" onclick="startDirectFlash()">Connect & Flash Firmware</button>
+    <!-- Use ESP Web Tools install button directly to avoid module loading issues -->
+    <esp-web-install-button 
+      manifest="./esp-web-tools-manifest.json" 
+      improv-wifi="false">
+      Connect & Flash Firmware
+    </esp-web-install-button>
+    
+    <!-- Fallback button if ESP Web Tools doesn't work -->
+    <button id="flashBtn" onclick="startDirectFlash()" style="display: none; margin-top: 1rem;">Fallback: Manual Flash</button>
     
     <div class="comparison-links">
       <a href="test-esp-web-tools.html">← Dialog Version</a> | 
