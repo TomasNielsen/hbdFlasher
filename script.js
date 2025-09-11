@@ -41,8 +41,8 @@ class ESP32Flasher {
                 version: '1.36.0.16433',
                 name: '1.36.0 (Latest)',
                 parts: [
-                    { path: './firmware/v1.36.0.16433/bootloader/bootloader.bin', offset: 0 },
-                    { path: './firmware/v1.36.0.16433/partition_table/partition-table.bin', offset: 40960 },
+                    { path: './firmware/v1.36.0.16433/bootloader/bootloader.bin', offset: 0, skipInOta: true },
+                    { path: './firmware/v1.36.0.16433/partition_table/partition-table.bin', offset: 40960, skipInOta: true },
                     { path: './firmware/v1.36.0.16433/hbd.bin', offset: 65536, isApplication: true },
                     { path: './firmware/v1.36.0.16433/ota_data_initial.bin', offset: 9502720, skipInOta: true },
                     { path: './firmware/v1.36.0.16433/phy_init_data.bin', offset: 9510912 },
@@ -359,12 +359,19 @@ class ESP32Flasher {
             otaTargetAddress = await this.determineOtaSlot();
         }
         
-        console.log(`📥 Loading ${config.parts.length} firmware files...`);
+        const totalParts = config.parts.length;
+        const otaSkippedParts = this.useOtaUpdate ? config.parts.filter(p => p.skipInOta).length : 0;
+        const partsToFlash = totalParts - otaSkippedParts;
+        
+        console.log(`📥 Loading ${totalParts} firmware files...`);
+        if (this.useOtaUpdate) {
+            console.log(`   🔄 OTA mode: Skipping ${otaSkippedParts} protected regions, flashing ${partsToFlash} files`);
+        }
         
         for (const part of config.parts) {
-            // Skip OTA data in OTA mode (we'll handle it separately) 
+            // Skip protected regions in OTA mode (bootloader, partition table, OTA data) 
             if (this.useOtaUpdate && part.skipInOta) {
-                console.log(`  ⏭️ Skipping ${part.path} in OTA mode`);
+                console.log(`  ⏭️ Skipping ${part.path} in OTA mode (${part.offset === 0 ? 'bootloader' : part.offset === 40960 ? 'partition table' : 'protected'})`);
                 continue;
             }
             
@@ -679,10 +686,21 @@ class ESP32Flasher {
     }
 
     // Adaptive chunk size based on file size and ROM loader limitations (like esptool --chunk-size)
-    getAdaptiveChunkSize(fileSize) {
+    getAdaptiveChunkSize(fileSize, isOtaOperation = false) {
         const mbSize = fileSize / (1024 * 1024);
         
-        // ROM loader needs smaller chunks for stability with large files
+        // OTA partitions can handle larger chunks even with secure boot
+        if (isOtaOperation && this.useOtaUpdate) {
+            if (mbSize >= 3.0) {
+                return 2048; // Large OTA files: 2KB chunks
+            } else if (mbSize >= 1.0) {
+                return 4096; // Medium OTA files: 4KB chunks  
+            } else {
+                return 1024; // Small OTA files: 1KB chunks
+            }
+        }
+        
+        // Factory partition with secure boot needs smaller chunks
         if (this.romOnlyMode || this.secureBootEnabled) {
             if (mbSize >= 3.0) {
                 return 256; // Very large files: 256 bytes (like esptool for problematic transfers)
@@ -2065,8 +2083,10 @@ class ESP32Flasher {
             }
             
             // Adaptive chunk size based on file size (like esptool --chunk-size)
-            const chunkSize = this.getAdaptiveChunkSize(file.data.length);
-            console.log(`📦 Using chunk size: ${chunkSize} bytes for ${(file.data.length / 1024 / 1024).toFixed(2)}MB file`);
+            const isOtaOperation = this.useOtaUpdate && file.isApplication;
+            const chunkSize = this.getAdaptiveChunkSize(file.data.length, isOtaOperation);
+            const operationType = isOtaOperation ? 'OTA' : 'factory';
+            console.log(`📦 Using chunk size: ${chunkSize} bytes for ${(file.data.length / 1024 / 1024).toFixed(2)}MB file (${operationType})`);
             let sequence = 0;
             
             for (let offset = 0; offset < file.data.length; offset += chunkSize) {
