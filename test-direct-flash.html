@@ -222,11 +222,18 @@
         writer.releaseLock();
         await port.close();
         
-        log('🔧 Device in download mode, starting ESP Web Tools flash');
+        log('🔧 Device in download mode, requesting port access again for flashing');
+        
+        // Request port access again for ESP Web Tools (it needs a fresh port reference)
+        const flashPort = await navigator.serial.requestPort({
+          filters: [{ usbVendorId: 0x10c4 }, { usbVendorId: 0x1a86 }] // CP210x and CH340 chips
+        });
+        
+        log('📋 Port re-selected, starting ESP Web Tools flash');
         
         // Call ESP Web Tools flash API directly with explicit options
         await window.espWebToolsFlash(manifest, {
-          port: port,
+          port: flashPort,
           enableTracing: true,
           allowImprovSerial: false,
           showLogs: true
