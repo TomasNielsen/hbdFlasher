@@ -172,7 +172,9 @@
             
             // Create the install button element
             const installButton = document.createElement('esp-web-install-button');
-            installButton.setAttribute('manifest', './esp-web-tools-manifest.json');
+            
+            // Use inline manifest instead of external file
+            installButton.manifest = manifest;
             installButton.textContent = 'Connect & Flash Firmware';
             
             // Add event listeners for logging
