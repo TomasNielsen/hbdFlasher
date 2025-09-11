@@ -455,12 +455,12 @@ class ESP32Flasher {
         const syncCommand = this.createCommand(0x08, syncData);
         
         // Send sync command multiple times for reliability
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 12; attempt++) {
             console.log(`   SYNC attempt ${attempt + 1}...`);
             await this.writer.write(syncCommand);
             
             try {
-                const response = await this.readResponse(30000); // 30 second timeout for bootloader readiness
+                const response = await this.readResponse(5000); // 5 second timeout for faster feedback
                 if (response) {
                     console.log('✅ ESP32 SYNC successful');
                     return true;
@@ -472,7 +472,7 @@ class ESP32Flasher {
             await this.delay(100);
         }
         
-        throw new Error('ESP32 SYNC failed after 3 attempts');
+        throw new Error('ESP32 SYNC failed after 12 attempts');
     }
 
     async readResponse(timeoutMs = 10000) {
