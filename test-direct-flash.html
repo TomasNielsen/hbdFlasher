@@ -6,6 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
+  <script type="module">
+    import { flash } from "https://unpkg.com/esp-web-tools@9/dist/web/flash.js";
+    window.espWebToolsFlash = flash;
+  </script>
   <style>
     body {
       font-family: system-ui, sans-serif;
@@ -44,7 +48,7 @@
       margin: 1rem 0;
       font-size: 0.9rem;
     }
-    esp-web-install-button {
+    #flashBtn {
       display: block;
       width: 100%;
       margin: 1.5rem auto;
@@ -59,9 +63,14 @@
       transition: all 0.3s;
       text-align: center;
     }
-    esp-web-install-button:hover {
+    #flashBtn:hover {
       background: #2980b9;
       transform: translateY(-2px);
+    }
+    #flashBtn:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+      transform: none;
     }
     .log {
       margin-top: 1.5rem;
@@ -119,7 +128,7 @@
       • Device must be connected via USB-C
     </div>
 
-    <esp-web-install-button id="flashBtn">Connect & Flash Firmware</esp-web-install-button>
+    <button id="flashBtn" onclick="startDirectFlash()">Connect & Flash Firmware</button>
     
     <div class="comparison-links">
       <a href="test-esp-web-tools.html">← Dialog Version</a> | 
@@ -148,49 +157,50 @@
       ]
     };
 
+    // Enhanced logging
+    const logBox = document.getElementById("log");
+    function log(msg, type = 'info') {
+      const ts = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : '📋';
+      logBox.textContent += `[${ts}] ${prefix} ${msg}\n`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // Direct flash function that bypasses dialogs
+    window.startDirectFlash = async () => {
+      const button = document.getElementById("flashBtn");
+      
+      try {
+        button.disabled = true;
+        button.textContent = 'Connecting...';
+        
+        log('🚀 Starting direct ESP Web Tools flash...');
+        log('📋 Bypassing all dialogs and firmware selection');
+        log('🔧 Using manifest directly for secure boot compatibility');
+        
+        // Call ESP Web Tools flash API directly
+        await window.espWebToolsFlash({
+          manifest: manifest,
+          enableTracing: true,
+          improvWifi: false // Disable Improv for secure boot
+        });
+        
+        log('✅ Flash operation completed successfully!');
+        button.textContent = 'Flash Complete!';
+        
+      } catch (err) {
+        log(`❌ Flash failed: ${err.message}`, 'error');
+        button.textContent = 'Flash Failed - Retry?';
+        button.disabled = false;
+      }
+    };
+
     // Initialize when page loads
     document.addEventListener('DOMContentLoaded', () => {
-      // Attach manifest as Blob URL (ESP Web Tools requirement)
-      const button = document.getElementById("flashBtn");
-      const json = JSON.stringify(manifest);
-      const blob = new Blob([json], {type: "application/json"});
-      button.manifest = URL.createObjectURL(blob);
-      button.setAttribute("improv-wifi", "false"); // disable Improv Wi-Fi to avoid secure boot errors
-
-      // Enhanced logging
-      const logBox = document.getElementById("log");
-      function log(msg, type = 'info') {
-        const ts = new Date().toLocaleTimeString();
-        const prefix = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : '📋';
-        logBox.textContent += `[${ts}] ${prefix} ${msg}\n`;
-        logBox.scrollTop = logBox.scrollHeight;
-      }
-
-      // Log initialization
       log('🔧 Direct ESP Web Tools flasher initialized');
       log('📋 Firmware: HBD v1.36.0.16433 for ESP32-S3');
-      log('🔧 Mode: Direct flash, no dialogs, Improv disabled');
+      log('🔧 Mode: Direct API call, no dialogs, Improv disabled');
       log('🌐 Ready for secure boot device connection');
-
-      // Event listeners for detailed logging
-      button.addEventListener("state-changed", e => {
-        const state = e.detail.state;
-        const message = e.detail.message || '';
-        log(`State: ${state} ${message}`);
-        
-        // Log important state changes
-        if (state === 'CONNECTED') {
-          log('✅ Device connected successfully');
-        } else if (state === 'INSTALLING') {
-          log('🚀 Starting firmware installation...');
-        } else if (state === 'INSTALLED') {
-          log('✅ Firmware installation completed!');
-        }
-      });
-      
-      button.addEventListener("error", e => {
-        log(`Error: ${e.detail.error}`, 'error');
-      });
 
       // Override console for additional logging
       const originalLog = console.log;
