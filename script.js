@@ -572,12 +572,12 @@ class ESP32Flasher {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Esptool.py timeout constants with dynamic erase timeout calculation
-    getEsptoolTimeout(operation, eraseBlocks = 1) {
-        const timeouts = {
+    // Esptool.py timeout constants with dynamic timeout calculation
+    getEsptoolTimeout(operation, eraseBlocks = 1, dataSize = 0) {
+        const baseTimeouts = {
             'DEFAULT': 3000,        // 3 seconds
             'SYNC': 100,           // 100ms (already correct)  
-            'FLASH_DATA': 3000,    // 3 seconds for data operations
+            'FLASH_DATA': 3000,    // 3 seconds base for data operations
             'FLASH_END': 3000      // 3 seconds for completion
         };
         
@@ -587,7 +587,156 @@ class ESP32Flasher {
             return Math.max(10000, 10000 + (eraseBlocks * 2000));
         }
         
-        return timeouts[operation] || timeouts['DEFAULT'];
+        // Dynamic timeout for FLASH_DATA based on data size (like esptool timeout_per_mb)
+        if (operation === 'FLASH_DATA') {
+            const baseTimeout = baseTimeouts['FLASH_DATA'];
+            
+            if (dataSize > 0) {
+                // Calculate timeout per MB like esptool: base + extra time for large data
+                const mbSize = dataSize / (1024 * 1024);
+                const timeoutPerMb = this.secureBootEnabled ? 15000 : 8000; // ROM loader needs more time
+                
+                const calculatedTimeout = Math.max(baseTimeout, baseTimeout + (mbSize * timeoutPerMb));
+                console.log(`📊 Dynamic FLASH_DATA timeout: ${calculatedTimeout}ms for ${dataSize} bytes (${mbSize.toFixed(2)}MB)`);
+                return calculatedTimeout;
+            }
+            
+            return baseTimeout;
+        }
+        
+        return baseTimeouts[operation] || baseTimeouts['DEFAULT'];
+    }
+
+    // Calculate dynamic timeout based on file size for large transfers (esptool-style)
+    timeoutPerMb(fileSize) {
+        const mbSize = fileSize / (1024 * 1024);
+        const baseTimeout = this.secureBootEnabled ? 20000 : 10000; // ROM loader base timeout
+        const timeoutPerMb = this.secureBootEnabled ? 15000 : 8000;  // Additional per MB
+        
+        return Math.max(baseTimeout, baseTimeout + (mbSize * timeoutPerMb));
+    }
+
+    // Adaptive chunk size based on file size and ROM loader limitations (like esptool --chunk-size)
+    getAdaptiveChunkSize(fileSize) {
+        const mbSize = fileSize / (1024 * 1024);
+        
+        // ROM loader needs smaller chunks for stability with large files
+        if (this.romOnlyMode || this.secureBootEnabled) {
+            if (mbSize >= 3.0) {
+                return 256; // Very large files: 256 bytes (like esptool for problematic transfers)
+            } else if (mbSize >= 1.5) {
+                return 384; // Large files: 384 bytes
+            } else {
+                return 512; // Normal files: 512 bytes
+            }
+        } else {
+            // Stub loader can handle larger chunks
+            if (mbSize >= 2.0) {
+                return 512; // Large files: 512 bytes
+            } else {
+                return 1024; // Normal files: 1024 bytes
+            }
+        }
+    }
+
+    // ROM loader stability delays to prevent bootloader overload (esptool-style power management)
+    getRomStabilityDelay(fileSize, sequence, chunkSize) {
+        const mbSize = fileSize / (1024 * 1024);
+        
+        // No delays needed for stub loader
+        if (!this.romOnlyMode && !this.secureBootEnabled) {
+            return 0;
+        }
+        
+        // Progressive delays for ROM loader based on file size and sequence
+        const dataTransferred = sequence * chunkSize;
+        const kbTransferred = dataTransferred / 1024;
+        
+        // Large files need more frequent stability breaks
+        if (mbSize >= 3.0) {
+            // Very large files (3MB+): Pause every 10KB for 20ms
+            if (sequence % Math.ceil(10240 / chunkSize) === 0) {
+                return 20;
+            }
+        } else if (mbSize >= 1.5) {
+            // Large files (1.5MB+): Pause every 25KB for 15ms  
+            if (sequence % Math.ceil(25600 / chunkSize) === 0) {
+                return 15;
+            }
+        } else {
+            // Normal files: Pause every 50KB for 10ms
+            if (sequence % Math.ceil(51200 / chunkSize) === 0) {
+                return 10;
+            }
+        }
+        
+        // Additional stability break every 1MB for very large files
+        if (mbSize >= 2.0 && sequence % Math.ceil(1048576 / chunkSize) === 0) {
+            console.log(`🔄 ROM stability break: ${(kbTransferred / 1024).toFixed(1)}MB transferred`);
+            return 100; // Longer pause every MB
+        }
+        
+        return 0;
+    }
+
+    // Progressive retry strategy for FLASH_DATA failures
+    async handleFlashDataRetry(attemptNumber, totalFileSize, sequence) {
+        const mbSize = totalFileSize / (1024 * 1024);
+        
+        // Strategy based on attempt number and file size
+        switch (attemptNumber) {
+            case 0: // First retry: Simple delay
+                const simpleDelay = mbSize >= 2.0 ? 1000 : 500;
+                console.log(`📍 Retry strategy 1: Simple delay (${simpleDelay}ms)`);
+                await this.delay(simpleDelay);
+                break;
+                
+            case 1: // Second retry: Bootloader health check + longer delay
+                console.log(`📍 Retry strategy 2: Bootloader health check + extended delay`);
+                try {
+                    // Quick SYNC to check if bootloader is still responsive
+                    await this.esp32QuickSync();
+                    console.log(`✅ Bootloader still responsive`);
+                } catch (syncError) {
+                    console.log(`⚠️ Bootloader unresponsive, continuing with extended delay`);
+                }
+                
+                const extendedDelay = mbSize >= 2.0 ? 2000 : 1000;
+                await this.delay(extendedDelay);
+                break;
+                
+            default: // Final retry: Maximum delay  
+                console.log(`📍 Retry strategy 3: Maximum delay + power management`);
+                const maxDelay = mbSize >= 3.0 ? 3000 : 2000;
+                await this.delay(maxDelay);
+                break;
+        }
+    }
+
+    // Quick bootloader recovery for failed FLASH_DATA operations
+    async quickBootloaderRecovery() {
+        console.log(`🔧 Attempting quick bootloader recovery...`);
+        
+        // Step 1: Try to re-sync with bootloader
+        try {
+            await this.esp32Sync();
+            console.log(`✅ Bootloader SYNC recovered`);
+            return;
+        } catch (syncError) {
+            console.log(`⚠️ SYNC recovery failed, trying configuration restore...`);
+        }
+        
+        // Step 2: Re-detect secure boot status (may have been lost)
+        try {
+            await this.detectSecureBoot();
+            console.log(`✅ Secure boot configuration restored`);
+        } catch (configError) {
+            console.log(`⚠️ Configuration restore failed:`, configError.message);
+        }
+        
+        // Step 3: Short stabilization delay
+        await this.delay(1000);
+        console.log(`✅ Quick bootloader recovery completed`);
     }
 
     // ESP32 Serial Protocol Implementation
@@ -944,7 +1093,7 @@ class ESP32Flasher {
         return response;
     }
 
-    async esp32FlashData(data, sequence) {
+    async esp32FlashData(data, sequence, totalFileSize = 0) {
         // FLASH_DATA command data: data_size, sequence_num, 0, 0, data
         const header = new Uint8Array(16);
         const headerView = new DataView(header.buffer);
@@ -960,9 +1109,9 @@ class ESP32Flasher {
         
         const command = this.createCommand(0x03, payload);
         
-        // Esptool-style retry logic: 3 attempts with standard timeout
+        // Enhanced retry logic with progressive fallback (esptool-style)
         const WRITE_BLOCK_ATTEMPTS = 3;
-        const timeout = this.getEsptoolTimeout('FLASH_DATA');
+        let timeout = this.getEsptoolTimeout('FLASH_DATA', 1, totalFileSize);
         
         for (let attempt = 0; attempt < WRITE_BLOCK_ATTEMPTS; attempt++) {
             try {
@@ -974,9 +1123,28 @@ class ESP32Flasher {
                 
                 if (attempt < WRITE_BLOCK_ATTEMPTS - 1) {
                     console.log(`🔄 Retrying FLASH_DATA seq=${sequence} (attempt ${attempt + 2}/${WRITE_BLOCK_ATTEMPTS})...`);
-                    await this.delay(100); // Fixed delay like esptool
+                    
+                    // Progressive fallback strategy
+                    await this.handleFlashDataRetry(attempt, totalFileSize, sequence);
+                    
+                    // Increase timeout progressively for retries
+                    timeout = Math.min(timeout * 1.5, 60000); // Max 60 second timeout
+                    
                 } else {
-                    throw new Error(`FLASH_DATA failed after ${WRITE_BLOCK_ATTEMPTS} attempts (seq=${sequence}): ${error.message}`);
+                    // Final attempt failed - try bootloader recovery before giving up
+                    console.log(`💊 Final attempt failed, trying bootloader recovery...`);
+                    try {
+                        await this.quickBootloaderRecovery();
+                        console.log(`🔄 Recovery successful, making final retry...`);
+                        
+                        await this.writer.write(command);
+                        const response = await this.readResponse(timeout * 2); // Double timeout for recovery attempt
+                        console.log(`✅ FLASH_DATA recovered after bootloader reset (seq=${sequence})`);
+                        return response;
+                    } catch (recoveryError) {
+                        console.log(`❌ Bootloader recovery failed:`, recoveryError.message);
+                        throw new Error(`FLASH_DATA failed after ${WRITE_BLOCK_ATTEMPTS} attempts + recovery (seq=${sequence}): ${error.message}`);
+                    }
                 }
             }
         }
@@ -1421,19 +1589,21 @@ class ESP32Flasher {
                 }
             }
             
-            // Send data in smaller chunks for better ESP32-S3 compatibility
-            const chunkSize = 512; // Reduced from 1024 to 512 bytes
+            // Adaptive chunk size based on file size (like esptool --chunk-size)
+            const chunkSize = this.getAdaptiveChunkSize(file.data.length);
+            console.log(`📦 Using chunk size: ${chunkSize} bytes for ${(file.data.length / 1024 / 1024).toFixed(2)}MB file`);
             let sequence = 0;
             
             for (let offset = 0; offset < file.data.length; offset += chunkSize) {
                 const chunk = file.data.slice(offset, offset + chunkSize);
                 
-                await this.esp32FlashData(chunk, sequence);
+                await this.esp32FlashData(chunk, sequence, file.data.length);
                 sequence++;
                 
-                // Add small delay for ESP32-S3 flash write stability
-                if (sequence % 50 === 0) {  // Every 50 chunks (~25KB)
-                    await this.delay(10); // 10ms pause to let flash controller catch up
+                // ROM loader stability enhancements for large files
+                const stabilityDelay = this.getRomStabilityDelay(file.data.length, sequence, chunkSize);
+                if (stabilityDelay > 0) {
+                    await this.delay(stabilityDelay);
                 }
                 
                 // Report progress every 10% to reduce log spam
