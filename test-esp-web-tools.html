@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP Web Tools Test - HBD Secure Boot</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+        
+        .flash-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .flash-btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
+        
+        .flash-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .info-box {
+            background: #e8f4f8;
+            border: 1px solid #3498db;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .warning-box {
+            background: #fef9e7;
+            border: 1px solid #f39c12;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .firmware-details {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .log-container {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .comparison-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .comparison-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <script type="module">
+        import { flash } from "https://unpkg.com/esp-web-tools@9/dist/web/install-button.js";
+
+        // Manifest aligned with HBD firmware structure 
+        const manifest = {
+            name: "HBD ESP32-S3 Firmware v1.36.0.16433",
+            builds: [
+                {
+                    chipFamily: "ESP32-S3",
+                    parts: [
+                        // Skipping bootloader.bin at 0x0 for secure boot compatibility
+                        { path: "./firmware/v1.36.0.16433/partition_table/partition-table.bin", offset: 0xa000 },
+                        { path: "./firmware/v1.36.0.16433/hbd.bin", offset: 0x10000 },
+                        { path: "./firmware/v1.36.0.16433/ota_data_initial.bin", offset: 0x910000 },
+                        { path: "./firmware/v1.36.0.16433/phy_init_data.bin", offset: 0x912000 },
+                        { path: "./firmware/v1.36.0.16433/assets.bin", offset: 0x914000 }
+                    ]
+                }
+            ]
+        };
+
+        // Enhanced logging
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const logContainer = document.getElementById('log-container');
+        
+        function logToPage(message, type = 'info') {
+            if (logContainer) {
+                const timestamp = new Date().toLocaleTimeString();
+                const prefix = type === 'error' ? '❌' : type === 'warn' ? '⚠️' : '📋';
+                logContainer.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+        }
+
+        console.log = (...args) => {
+            originalConsoleLog(...args);
+            logToPage(args.join(' '));
+        };
+
+        console.error = (...args) => {
+            originalConsoleError(...args);
+            logToPage(args.join(' '), 'error');
+        };
+
+        window.startFlashing = async () => {
+            const flashBtn = document.getElementById('flash-btn');
+            
+            try {
+                flashBtn.disabled = true;
+                flashBtn.textContent = 'Connecting...';
+                
+                logToPage('🚀 Starting ESP Web Tools flash process...');
+                logToPage('📋 Firmware: HBD v1.36.0.16433 for ESP32-S3');
+                logToPage('🔧 Mode: Secure Boot Compatible (skipping bootloader)');
+                
+                await flash({
+                    manifest,
+                    enableTracing: true, // Enable detailed ESP Web Tools logging
+                    logger: {
+                        log: (msg) => logToPage(`ESP-WT: ${msg}`),
+                        error: (msg) => logToPage(`ESP-WT ERROR: ${msg}`, 'error'),
+                        debug: (msg) => logToPage(`ESP-WT DEBUG: ${msg}`)
+                    }
+                });
+                
+                logToPage('✅ Flash operation completed successfully!');
+                flashBtn.textContent = 'Flash Complete!';
+                
+            } catch (err) {
+                console.error("ESP Web Tools flashing failed:", err);
+                logToPage(`❌ Flash failed: ${err.message}`, 'error');
+                flashBtn.textContent = 'Flash Failed - Retry?';
+                flashBtn.disabled = false;
+            }
+        };
+
+        // Page initialization
+        window.addEventListener('DOMContentLoaded', () => {
+            logToPage('🔧 ESP Web Tools Test Page Loaded');
+            logToPage('📋 Testing secure boot device compatibility');
+            logToPage('🌐 Make sure to use Chrome/Edge with HTTPS');
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>ESP Web Tools Test</h1>
+        <p class="subtitle">HBD ESP32-S3 Secure Boot Device Testing</p>
+        
+        <div class="info-box">
+            <strong>Test Purpose:</strong> Compare ESP Web Tools (official) vs our custom implementation for secure boot device flashing.
+        </div>
+        
+        <div class="firmware-details">
+            <strong>Firmware Details:</strong><br>
+            • Version: v1.36.0.16433<br>
+            • Target: ESP32-S3 with Secure Boot<br>
+            • Bootloader: SKIPPED (0x0) - Secure boot compatibility<br>
+            • Partition Table: 0xa000<br>
+            • Application: 0x10000 (hbd.bin - 1.7MB)<br>
+            • OTA Data: 0x910000<br>
+            • PHY Init: 0x912000<br>
+            • Assets: 0x914000
+        </div>
+        
+        <button id="flash-btn" class="flash-btn" onclick="startFlashing()">Connect & Flash Firmware</button>
+        
+        <div class="warning-box">
+            <strong>Requirements:</strong><br>
+            • Chrome or Edge browser<br>
+            • HTTPS connection<br>
+            • ESP32-S3 device in download mode<br>
+            • Device must be secure boot enabled for proper testing
+        </div>
+        
+        <a href="index.html" class="comparison-link">← Back to Main Web Flasher</a>
+        
+        <div class="log-container" id="log-container"></div>
+    </div>
+</body>
+</html>
