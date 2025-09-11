@@ -100,10 +100,30 @@
         .comparison-link:hover {
             text-decoration: underline;
         }
+        
+        .flash-btn-container {
+            margin: 20px 0;
+        }
+        
+        esp-web-install-button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-block;
+        }
+        
+        esp-web-install-button:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+        }
     </style>
+    <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
     <script type="module">
-        import { flash } from "https://unpkg.com/esp-web-tools@9/dist/web/install-button.js";
-
         // Manifest aligned with HBD firmware structure 
         const manifest = {
             name: "HBD ESP32-S3 Firmware v1.36.0.16433",
@@ -146,45 +166,39 @@
             logToPage(args.join(' '), 'error');
         };
 
-        async function startFlashing() {
-            const flashBtn = document.getElementById('flash-btn');
+        // Create and configure ESP Web Tools install button
+        function initializeEspWebTools() {
+            const container = document.getElementById('esp-web-tools-container');
             
-            try {
-                flashBtn.disabled = true;
-                flashBtn.textContent = 'Connecting...';
-                
-                logToPage('🚀 Starting ESP Web Tools flash process...');
-                logToPage('📋 Firmware: HBD v1.36.0.16433 for ESP32-S3');
-                logToPage('🔧 Mode: Secure Boot Compatible (skipping bootloader)');
-                
-                await flash({
-                    manifest,
-                    enableTracing: true, // Enable detailed ESP Web Tools logging
-                    logger: {
-                        log: (msg) => logToPage(`ESP-WT: ${msg}`),
-                        error: (msg) => logToPage(`ESP-WT ERROR: ${msg}`, 'error'),
-                        debug: (msg) => logToPage(`ESP-WT DEBUG: ${msg}`)
-                    }
-                });
-                
-                logToPage('✅ Flash operation completed successfully!');
-                flashBtn.textContent = 'Flash Complete!';
-                
-            } catch (err) {
-                console.error("ESP Web Tools flashing failed:", err);
-                logToPage(`❌ Flash failed: ${err.message}`, 'error');
-                flashBtn.textContent = 'Flash Failed - Retry?';
-                flashBtn.disabled = false;
-            }
-        };
-
-        // Expose function globally and initialize page
-        window.startFlashing = startFlashing;
+            // Create the install button element
+            const installButton = document.createElement('esp-web-install-button');
+            installButton.setAttribute('manifest', './esp-web-tools-manifest.json');
+            installButton.textContent = 'Connect & Flash Firmware';
+            
+            // Add event listeners for logging
+            installButton.addEventListener('state-changed', (event) => {
+                logToPage(`ESP-WT State: ${event.detail.state}`);
+                if (event.detail.message) {
+                    logToPage(`ESP-WT: ${event.detail.message}`);
+                }
+            });
+            
+            installButton.addEventListener('error', (event) => {
+                logToPage(`ESP-WT Error: ${event.detail.error}`, 'error');
+            });
+            
+            container.appendChild(installButton);
+            
+            logToPage('🚀 ESP Web Tools initialized');
+            logToPage('📋 Firmware: HBD v1.36.0.16433 for ESP32-S3'); 
+            logToPage('🔧 Mode: Secure Boot Compatible (skipping bootloader)');
+        }
         
         window.addEventListener('DOMContentLoaded', () => {
             logToPage('🔧 ESP Web Tools Test Page Loaded');
             logToPage('📋 Testing secure boot device compatibility');
             logToPage('🌐 Make sure to use Chrome/Edge with HTTPS');
+            initializeEspWebTools();
         });
     </script>
 </head>
@@ -209,7 +223,7 @@
             • Assets: 0x914000
         </div>
         
-        <button id="flash-btn" class="flash-btn" onclick="startFlashing()">Connect & Flash Firmware</button>
+        <div id="esp-web-tools-container" class="flash-btn-container"></div>
         
         <div class="warning-box">
             <strong>Requirements:</strong><br>
