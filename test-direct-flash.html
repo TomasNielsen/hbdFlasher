@@ -7,7 +7,7 @@
 
   <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
   <script type="module">
-    import { flash } from "https://unpkg.com/esp-web-tools@9/dist/web/flash.js";
+    import { flash } from "https://unpkg.com/esp-web-tools@9/dist/flash.js";
     window.espWebToolsFlash = flash;
   </script>
   <style>
@@ -175,14 +175,22 @@
         button.textContent = 'Connecting...';
         
         log('🚀 Starting direct ESP Web Tools flash...');
-        log('📋 Bypassing all dialogs and firmware selection');
+        log('📋 Requesting serial port access directly...');
+        
+        // Request serial port access directly to bypass device selection
+        const port = await navigator.serial.requestPort({
+          filters: [{ usbVendorId: 0x10c4 }, { usbVendorId: 0x1a86 }] // CP210x and CH340 chips
+        });
+        
+        log('🔌 Serial port selected, starting flash process');
         log('🔧 Using manifest directly for secure boot compatibility');
         
-        // Call ESP Web Tools flash API directly
-        await window.espWebToolsFlash({
-          manifest: manifest,
+        // Call ESP Web Tools flash API directly with explicit options
+        await window.espWebToolsFlash(manifest, {
+          port: port,
           enableTracing: true,
-          improvWifi: false // Disable Improv for secure boot
+          allowImprovSerial: false,
+          showLogs: true
         });
         
         log('✅ Flash operation completed successfully!');
