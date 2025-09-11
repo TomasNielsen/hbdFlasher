@@ -689,6 +689,11 @@ class ESP32Flasher {
 
     // Adaptive chunk size based on file size and ROM loader limitations (like esptool --chunk-size)
     getAdaptiveChunkSize(fileSize, isOtaOperation = false) {
+        // TEMPORARY DEBUG: Use small 512-byte chunks to test writer.write() stability
+        console.log(`🔧 DEBUG: Using small 512-byte chunks to isolate writer.write() hang issue`);
+        return 512;  // Small chunks until we solve the writer.write() hang
+        
+        /* ORIGINAL CODE - restore after fixing writer.write() hang:
         const mbSize = fileSize / (1024 * 1024);
         
         // OTA partitions can handle larger chunks even with secure boot
@@ -719,6 +724,7 @@ class ESP32Flasher {
                 return 1024; // Normal files: 1024 bytes
             }
         }
+        */
     }
 
     // ROM loader stability delays to prevent bootloader overload (esptool-style power management)
