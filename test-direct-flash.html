@@ -184,8 +184,24 @@
           filters: [{ usbVendorId: 0x10c4 }, { usbVendorId: 0x1a86 }] // CP210x and CH340 chips
         });
         
-        log('🔌 Serial port selected, starting flash process');
-        log('🔧 Using manifest directly for secure boot compatibility');
+        log('🔌 Serial port selected, putting device in download mode');
+        
+        // Put device in download mode before flashing
+        await port.open({ baudRate: 115200 });
+        const writer = port.writable.getWriter();
+        
+        // Reset sequence to put ESP32 in download mode
+        log('📋 Asserting reset and boot pins...');
+        await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+        await new Promise(resolve => setTimeout(resolve, 50));
+        await port.setSignals({ dataTerminalReady: false });
+        
+        writer.releaseLock();
+        await port.close();
+        
+        log('🔧 Device in download mode, starting ESP Web Tools flash');
         
         // Call ESP Web Tools flash API directly with explicit options
         await window.espWebToolsFlash(manifest, {
