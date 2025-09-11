@@ -1465,6 +1465,30 @@ class ESP32Flasher {
         const blocks = Math.ceil(size / 65536);
         const response = await this.readResponse(this.getEsptoolTimeout('FLASH_BEGIN', blocks));
         console.log('✅ FLASH_BEGIN successful');
+        
+        // Add stabilization delay for large erase operations (ROM loader needs time)
+        if (blocks >= 10) {  // Large erase operations (>640KB)
+            const stabilizationDelay = Math.min(blocks * 100, 3000); // 100ms per block, max 3s
+            console.log(`⏳ Large erase operation (${blocks} blocks) - allowing ${stabilizationDelay}ms for ROM loader stabilization...`);
+            await this.delay(stabilizationDelay);
+            console.log('✅ ROM loader stabilization complete');
+            
+            // Verify ROM loader is responsive after large erase
+            try {
+                console.log('🔍 Verifying ROM loader state after large erase...');
+                await this.esp32QuickSync();
+                console.log('✅ ROM loader verification successful - ready for FLASH_DATA');
+            } catch (syncError) {
+                console.log('⚠️ ROM loader verification failed after large erase:', syncError.message);
+                console.log('🔄 Attempting ROM loader recovery...');
+                
+                // Brief delay and retry sync
+                await this.delay(1000);
+                await this.esp32Sync();
+                console.log('✅ ROM loader recovery successful');
+            }
+        }
+        
         return response;
     }
 
@@ -2087,10 +2111,19 @@ class ESP32Flasher {
             const chunkSize = this.getAdaptiveChunkSize(file.data.length, isOtaOperation);
             const operationType = isOtaOperation ? 'OTA' : 'factory';
             console.log(`📦 Using chunk size: ${chunkSize} bytes for ${(file.data.length / 1024 / 1024).toFixed(2)}MB file (${operationType})`);
+            
+            const totalChunks = Math.ceil(file.data.length / chunkSize);
+            console.log(`🚀 Starting FLASH_DATA operations: ${totalChunks} chunks of ${chunkSize} bytes each`);
+            
             let sequence = 0;
             
             for (let offset = 0; offset < file.data.length; offset += chunkSize) {
                 const chunk = file.data.slice(offset, offset + chunkSize);
+                
+                // Log progress for first few chunks to detect startup issues
+                if (sequence < 5 || sequence % 50 === 0) {
+                    console.log(`📤 FLASH_DATA chunk ${sequence + 1}/${totalChunks}: ${chunk.length} bytes`);
+                }
                 
                 await this.esp32FlashData(chunk, sequence, file.data.length);
                 sequence++;
