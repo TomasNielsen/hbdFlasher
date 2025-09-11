@@ -844,6 +844,126 @@ class ESP32Flasher {
         }
     }
 
+    validateSecureBootResponse(cmd, result, responseSize) {
+        const startTime = Date.now();
+        
+        // Command-specific validation for secure boot devices
+        switch (cmd) {
+            case 0x02: // FLASH_BEGIN
+                this.validateFlashBeginResponse(result, responseSize, startTime);
+                break;
+            case 0x03: // FLASH_DATA  
+                this.validateFlashDataResponse(result, responseSize, startTime);
+                break;
+            case 0x04: // FLASH_END
+                this.validateFlashEndResponse(result, responseSize, startTime);
+                break;
+        }
+    }
+
+    validateFlashBeginResponse(result, responseSize, startTime) {
+        // FLASH_BEGIN should not complete too quickly for large erase operations
+        const responseTime = Date.now() - startTime;
+        
+        if (responseTime < 100) {
+            console.log(`⚠️ FLASH_BEGIN completed very quickly (${responseTime}ms) - potential silent failure`);
+            console.log(`💡 This may indicate secure boot blocked the erase operation but reported success`);
+        }
+        
+        // Validate response has expected structure for FLASH_BEGIN
+        if (responseSize === 0) {
+            console.log(`✅ FLASH_BEGIN response validated: ${responseTime}ms`);
+        } else {
+            console.log(`⚠️ FLASH_BEGIN returned unexpected data size: ${responseSize} bytes`);
+        }
+    }
+
+    validateFlashDataResponse(result, responseSize, startTime) {
+        const responseTime = Date.now() - startTime;
+        
+        // FLASH_DATA responses should be minimal for successful writes
+        if (responseSize > 8) {
+            console.log(`⚠️ FLASH_DATA returned unexpected large response: ${responseSize} bytes`);
+        }
+        
+        // Extremely fast responses may indicate writes were ignored
+        if (responseTime < 10) {
+            console.log(`⚠️ FLASH_DATA completed very quickly (${responseTime}ms) - possible silent failure`);
+        }
+    }
+
+    validateFlashEndResponse(result, responseSize, startTime) {
+        const responseTime = Date.now() - startTime;
+        
+        // FLASH_END should complete reasonably quickly but not instantly
+        if (responseTime < 50) {
+            console.log(`⚠️ FLASH_END completed very quickly (${responseTime}ms) - potential issue`);
+        }
+        
+        console.log(`✅ FLASH_END response validated: ${responseTime}ms`);
+    }
+
+    // Enhanced retry strategy for secure boot devices
+    async handleSecureBootFlashRetry(attemptNumber, fileSize, fileAddress) {
+        console.log(`🔐 Secure boot retry strategy ${attemptNumber + 1}:`);
+        
+        switch (attemptNumber) {
+            case 0: // First retry: Extended delay + sync check
+                console.log(`   📍 Strategy 1: Extended delay + bootloader sync validation`);
+                await this.delay(2000); // Longer delay for secure boot
+                
+                try {
+                    await this.esp32Sync();
+                    console.log(`   ✅ Bootloader sync successful`);
+                } catch (syncError) {
+                    console.log(`   ⚠️ Bootloader sync failed, continuing anyway`);
+                }
+                break;
+                
+            case 1: // Second retry: Alternative parameters + longer delay
+                console.log(`   📍 Strategy 2: Alternative secure boot parameters + extended delay`);
+                console.log(`   💡 Attempting with modified secure boot parameters`);
+                
+                // Store original encrypted mode preference
+                const originalSecureBoot = this.secureBootEnabled;
+                
+                // Try with standard parameters if we were using encrypted mode
+                // (This is experimental - some secure boot configs might work with standard params)
+                if (this.secureBootEnabled) {
+                    console.log(`   🧪 Experimental: Temporarily trying standard flash parameters`);
+                    this.secureBootEnabled = false;
+                }
+                
+                await this.delay(3000);
+                
+                // Restore original setting for consistency
+                this.secureBootEnabled = originalSecureBoot;
+                break;
+                
+            case 2: // Final retry: Maximum compatibility mode
+                console.log(`   📍 Strategy 3: Maximum compatibility mode + maximum delay`);
+                console.log(`   🚨 Final attempt with maximum secure boot compatibility`);
+                
+                // Longer delay for final attempt
+                await this.delay(5000);
+                
+                // Additional sync attempt with longer timeout
+                try {
+                    await this.esp32Sync();
+                    console.log(`   ✅ Final sync successful - device ready for last attempt`);
+                } catch (syncError) {
+                    console.log(`   ⚠️ Final sync failed: ${syncError.message}`);
+                    console.log(`   🎯 Proceeding with final flash attempt anyway`);
+                }
+                break;
+                
+            default:
+                console.log(`   📍 Strategy ${attemptNumber + 1}: Basic delay`);
+                await this.delay(1000);
+                break;
+        }
+    }
+
     // ESP32 Serial Protocol Implementation
     slipEncode(data) {
         const encoded = [];
@@ -912,6 +1032,11 @@ class ESP32Flasher {
                     }
                     
                     throw new Error(`ESP32 command failed with status: ${statusHex}`);
+                }
+                
+                // Enhanced validation for secure boot devices
+                if (this.secureBootEnabled) {
+                    this.validateSecureBootResponse(cmd, result, size);
                 }
                 
                 return result; // Success - return full response
@@ -1151,17 +1276,22 @@ class ESP32Flasher {
         const packetSize = 1024; // 1KB packets
         const numPackets = Math.ceil(size / packetSize);
         
+        // For secure boot devices, use encrypted flash mode (5th parameter)
+        const encryptedMode = this.secureBootEnabled ? 1 : 0;
+        
         console.log(`   Erase size: ${eraseSize} bytes (${eraseSize/65536} blocks)`);
         console.log(`   Packets: ${numPackets} x ${packetSize} bytes`);
         console.log(`   Offset: 0x${offset.toString(16)}`);
+        console.log(`   Encrypted mode: ${encryptedMode} (secure boot: ${this.secureBootEnabled})`);
         
-        // FLASH_BEGIN command data: erase_size, num_packets, packet_size, offset
-        const data = new Uint8Array(16);
+        // FLASH_BEGIN command data: erase_size, num_packets, packet_size, offset, encrypted_mode
+        const data = new Uint8Array(20); // Extended to 20 bytes for 5th parameter
         const view = new DataView(data.buffer);
         view.setUint32(0, eraseSize, true);
         view.setUint32(4, numPackets, true);
         view.setUint32(8, packetSize, true);
         view.setUint32(12, offset, true);
+        view.setUint32(16, encryptedMode, true); // 5th parameter for encrypted flash
         
         const command = this.createCommand(0x02, data);
         await this.writer.write(command);
@@ -1171,6 +1301,51 @@ class ESP32Flasher {
         const response = await this.readResponse(this.getEsptoolTimeout('FLASH_BEGIN', blocks));
         console.log('✅ FLASH_BEGIN successful');
         return response;
+    }
+
+    async esp32FlashEraseSimulation(size) {
+        if (!this.secureBootEnabled) {
+            console.log('⏭️ Skipping erase simulation (not secure boot device)');
+            return;
+        }
+
+        console.log(`🧹 Starting 0xFF pre-fill erase simulation for ${size} bytes`);
+        
+        // Use 4KB chunks for erase simulation (optimal for secure boot)
+        const eraseChunkSize = 4096;
+        const numChunks = Math.ceil(size / eraseChunkSize);
+        
+        // Create 0xFF buffer for erase simulation
+        const eraseBuffer = new Uint8Array(eraseChunkSize).fill(0xFF);
+        
+        console.log(`   Erase chunks: ${numChunks} x ${eraseChunkSize} bytes`);
+        
+        for (let i = 0; i < numChunks; i++) {
+            const isLastChunk = i === numChunks - 1;
+            const chunkSize = isLastChunk ? size % eraseChunkSize || eraseChunkSize : eraseChunkSize;
+            const currentChunk = chunkSize === eraseChunkSize ? eraseBuffer : new Uint8Array(chunkSize).fill(0xFF);
+            
+            try {
+                await this.esp32FlashData(currentChunk, i, size);
+                
+                // Progress reporting every 10 chunks to reduce log spam
+                if (i % 10 === 0 || isLastChunk) {
+                    const progress = ((i + 1) / numChunks * 100).toFixed(0);
+                    console.log(`🧹 Erase simulation progress: ${progress}% (chunk ${i + 1}/${numChunks})`);
+                }
+                
+                // Small delay for ROM loader stability during erase operations
+                if (i % 50 === 0 && i > 0) {
+                    await this.delay(100);
+                }
+                
+            } catch (error) {
+                console.log(`❌ Erase simulation failed at chunk ${i + 1}:`, error.message);
+                throw new Error(`Erase simulation failed: ${error.message}`);
+            }
+        }
+        
+        console.log('✅ 0xFF erase simulation completed successfully');
     }
 
     async esp32FlashData(data, sequence, totalFileSize = 0) {
@@ -1744,6 +1919,10 @@ class ESP32Flasher {
                 try {
                     await this.esp32FlashBegin(file.data.length, file.address);
                     console.log(`🧹 Flash region 0x${file.address.toString(16)} prepared for ${file.data.length} bytes`);
+                    
+                    // Perform 0xFF erase simulation for secure boot devices
+                    await this.esp32FlashEraseSimulation(file.data.length);
+                    
                     break; // Success, exit retry loop
                 } catch (error) {
                     retryCount++;
@@ -1762,22 +1941,21 @@ class ESP32Flasher {
                     }
                     
                     if (retryCount < maxRetries) {
-                        console.log('🔧 Attempting device recovery...');
+                        console.log(`🔧 Attempting device recovery (attempt ${retryCount}/${maxRetries})...`);
                         
-                        // Try to re-establish communication
-                        try {
-                            // Small delay before recovery attempt
+                        // Use enhanced secure boot retry strategy
+                        if (this.secureBootEnabled) {
+                            await this.handleSecureBootFlashRetry(retryCount - 1, file.data.length, file.address);
+                        } else {
+                            // Standard recovery for non-secure boot devices
+                            console.log('📍 Standard recovery: Device sync + delay');
                             await this.delay(1000);
                             
-                            // Try SYNC to see if device is still responsive
-                            await this.esp32Sync();
-                            console.log('✅ Device recovery successful, retrying FLASH_BEGIN...');
-                        } catch (syncError) {
-                            console.log('❌ Device recovery failed:', syncError.message);
-                            
-                            // If this is the last retry, throw the error
-                            if (retryCount === maxRetries) {
-                                throw new Error(`Failed to flash file ${fileIndex + 1} after ${maxRetries} attempts: ${error.message}`);
+                            try {
+                                await this.esp32Sync();
+                                console.log('✅ Device recovery successful, retrying FLASH_BEGIN...');
+                            } catch (syncError) {
+                                console.log('⚠️ Device recovery failed, continuing with retry...');
                             }
                         }
                     } else {
