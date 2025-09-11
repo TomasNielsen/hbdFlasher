@@ -1237,6 +1237,27 @@ class ESP32Flasher {
         return this.slipEncode(packet);
     }
 
+    createCommandWithCustomChecksum(cmd, data = new Uint8Array(0), checksumData = null) {
+        const packet = new Uint8Array(8 + data.length);
+        const view = new DataView(packet.buffer);
+        
+        // Command packet structure
+        view.setUint8(0, 0x00);           // Direction (request)
+        view.setUint8(1, cmd);            // Command
+        view.setUint16(2, data.length, true); // Size (little endian)
+        
+        // Use custom data for checksum calculation if provided, otherwise use full data
+        const dataForChecksum = checksumData || data;
+        view.setUint32(4, this.calculateChecksum(dataForChecksum), true); // Checksum
+        
+        // Copy data
+        if (data.length > 0) {
+            packet.set(data, 8);
+        }
+        
+        return this.slipEncode(packet);
+    }
+
     // Lightweight SYNC check for inter-file communication
     async esp32QuickSync() {
         // Single quick SYNC attempt for inter-file transitions
@@ -1507,7 +1528,9 @@ class ESP32Flasher {
         payload.set(header, 0);
         payload.set(data, header.length);
         
-        const command = this.createCommand(0x03, payload);
+        // CRITICAL FIX: Pass only the firmware data for checksum calculation
+        // According to esptool docs, checksum should ONLY apply to actual data payload
+        const command = this.createCommandWithCustomChecksum(0x03, payload, data);
         
         // Enhanced retry logic with progressive fallback (esptool-style)
         const WRITE_BLOCK_ATTEMPTS = 3;
