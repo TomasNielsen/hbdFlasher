@@ -176,6 +176,7 @@
             // ESP Web Tools expects a manifest URL, not an object
             // Let's go back to using the external JSON file
             installButton.setAttribute('manifest', './esp-web-tools-manifest.json');
+            installButton.setAttribute('improv-wifi', 'false'); // Disable Improv to avoid secure boot conflicts
             installButton.textContent = 'Connect & Flash Firmware';
             
             // Add event listeners for logging
