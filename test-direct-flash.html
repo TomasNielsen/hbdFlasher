@@ -163,10 +163,11 @@
       • Device must be connected via USB-C
     </div>
 
-    <!-- Use ESP Web Tools install button directly to avoid module loading issues -->
+    <!-- Use ESP Web Tools install button with correct attributes -->
     <esp-web-install-button 
       manifest="./esp-web-tools-manifest.json" 
-      improv-wifi="false">
+      no-improv
+      erase-first>
       Connect & Flash Firmware
     </esp-web-install-button>
     
