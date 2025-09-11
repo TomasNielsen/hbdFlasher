@@ -1540,6 +1540,18 @@ class ESP32Flasher {
         // According to esptool docs, checksum should ONLY apply to actual data payload
         const command = this.createCommandWithCustomChecksum(0x03, payload, data);
         
+        // DEBUG: Verify ROM loader is responsive before first FLASH_DATA
+        if (sequence === 0) {
+            console.log(`🔍 Testing ROM loader communication before first FLASH_DATA...`);
+            try {
+                await this.esp32QuickSync();
+                console.log(`✅ ROM loader responsive - proceeding with FLASH_DATA`);
+            } catch (syncError) {
+                console.log(`❌ ROM loader not responsive:`, syncError.message);
+                throw new Error(`ROM loader sync failed before FLASH_DATA: ${syncError.message}`);
+            }
+        }
+        
         // DEBUG: Log detailed packet information for first chunk
         if (sequence === 0) {
             const checksumOnData = this.calculateChecksum(data);
@@ -1558,7 +1570,17 @@ class ESP32Flasher {
         
         for (let attempt = 0; attempt < WRITE_BLOCK_ATTEMPTS; attempt++) {
             try {
+                // DEBUG: Log before write operation
+                if (sequence === 0) {
+                    console.log(`📡 Sending FLASH_DATA command to ESP32... (${command.length} bytes)`);
+                }
+                
                 await this.writer.write(command);
+                
+                // DEBUG: Log after successful write
+                if (sequence === 0) {
+                    console.log(`✅ FLASH_DATA command sent successfully, waiting for response...`);
+                }
                 
                 // DEBUG: Use shorter timeout for first chunk to detect immediate failures
                 const debugTimeout = (sequence === 0) ? 5000 : timeout; // 5 seconds for first chunk
