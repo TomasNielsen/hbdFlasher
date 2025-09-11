@@ -1,8 +1,6 @@
 {
   "name": "HBD ESP32-S3 Firmware v1.36.0.16433",
-  "version": "1.36.0.16433", 
-  "home_assistant_domain": "hbd",
-  "new_install_prompt_erase": true,
+  "version": "1.36.0.16433",
   "builds": [
     {
       "chipFamily": "ESP32-S3",
