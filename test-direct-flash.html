@@ -5,12 +5,24 @@
   <title>HBD ESP32-S3 Direct Flasher</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
+  <script type="module" src="https://unpkg.com/esp-web-tools@9.4.3/dist/web/install-button.js"></script>
   <script type="module">
-    import { flash } from "https://unpkg.com/esp-web-tools@9/dist/flash.js";
-    window.espWebToolsFlash = flash;
-    console.log('ESP Web Tools flash function loaded:', typeof flash);
-    console.log('Direct flash page loaded - no esptool-js imports');
+    // Try loading ESP Web Tools with specific version that includes bundled dependencies
+    try {
+      const { flash } = await import("https://unpkg.com/esp-web-tools@9.4.3/dist/flash.js");
+      window.espWebToolsFlash = flash;
+      console.log('ESP Web Tools flash function loaded:', typeof flash);
+    } catch (error) {
+      console.error('Failed to load ESP Web Tools:', error);
+      // Fallback to CDN that bundles all dependencies
+      try {
+        const { flash } = await import("https://cdn.jsdelivr.net/npm/esp-web-tools@9.4.3/dist/flash.js");
+        window.espWebToolsFlash = flash;
+        console.log('ESP Web Tools loaded from JSDelivr fallback');
+      } catch (fallbackError) {
+        console.error('All ESP Web Tools loading attempts failed:', fallbackError);
+      }
+    }
   </script>
   <style>
     body {
