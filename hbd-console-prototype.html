@@ -409,6 +409,12 @@
 
                 log('✅ Successfully connected to HBD device');
                 
+                // Wait a moment for device to send initial data
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Send a simple newline to trigger prompt
+                await sendCommand('');
+                
                 // Start reading responses
                 readLoop();
 
@@ -451,15 +457,37 @@
 
         // Read loop for incoming data
         async function readLoop() {
+            let buffer = '';
             try {
                 while (isConnected && reader) {
                     const { value, done } = await reader.read();
                     if (done) break;
                     
                     const text = new TextDecoder().decode(value);
-                    // Process received data (you can expand this for command responses)
-                    if (text.trim()) {
-                        log('📨 ' + text.trim(), 'response');
+                    buffer += text;
+                    
+                    // Debug: show raw bytes received
+                    if (value.length > 0) {
+                        const hexBytes = Array.from(value, byte => byte.toString(16).padStart(2, '0')).join(' ');
+                        log('🔍 Raw: [' + hexBytes + '] = "' + text.replace(/\r/g, '\\r').replace(/\n/g, '\\n') + '"', 'info');
+                    }
+                    
+                    // Process complete lines
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+                    
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (trimmed) {
+                            // Check for different output patterns
+                            if (trimmed.includes('hbd>')) {
+                                log('📨 ' + trimmed, 'response');
+                            } else if (trimmed.includes('UTC Time:') || trimmed.includes('Local Time:') || trimmed.includes('Timezone:')) {
+                                log('📨 ' + trimmed, 'response');
+                            } else if (trimmed.length > 0) {
+                                log('📨 ' + trimmed, 'response');
+                            }
+                        }
                     }
                 }
             } catch (error) {
