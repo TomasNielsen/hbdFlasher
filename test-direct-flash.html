@@ -150,9 +150,11 @@
 
     // Initialize when page loads
     document.addEventListener('DOMContentLoaded', () => {
-      // Attach manifest directly to the button
+      // Attach manifest as Blob URL (ESP Web Tools requirement)
       const button = document.getElementById("flashBtn");
-      button.manifest = manifest;
+      const json = JSON.stringify(manifest);
+      const blob = new Blob([json], {type: "application/json"});
+      button.manifest = URL.createObjectURL(blob);
       button.setAttribute("improv-wifi", "false"); // disable Improv Wi-Fi to avoid secure boot errors
 
       // Enhanced logging
