@@ -339,38 +339,52 @@ class ESP32Flasher {
                 return;
             }
             
-            console.log('🔧 ESP32-S3 reset sequence (matching Windows flasher):');
+            console.log('🔧 ESP32-S3 specific reset sequence (esptool.py compatible):');
             console.log('   DTR controls EN (enable/reset) - LOW = reset, HIGH = run');
             console.log('   RTS controls GPIO0 (boot mode) - LOW = bootloader, HIGH = normal');
             
-            // Step 1: Assert reset (EN low) and set bootloader mode (GPIO0 low)
-            console.log('📍 Step 1: Asserting reset and bootloader mode...');
+            // ESP32-S3 specific sequence: First ensure clean state
+            console.log('📍 Step 1: Ensuring clean signal state...');
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (not reset)
+                requestToSend: true        // GPIO0 = HIGH (normal mode)
+            });
+            await this.delay(100);
+            
+            // Step 2: Assert GPIO0 (bootloader mode) BEFORE reset
+            console.log('📍 Step 2: Setting bootloader mode before reset...');
+            await port.setSignals({
+                dataTerminalReady: true,   // EN = HIGH (still running)
+                requestToSend: false       // GPIO0 = LOW (bootloader mode)
+            });
+            await this.delay(100); // Let GPIO0 settle
+            
+            // Step 3: Assert reset while GPIO0 is held low
+            console.log('📍 Step 3: Asserting reset while GPIO0 held low...');
             await port.setSignals({
                 dataTerminalReady: false,  // EN = LOW (reset)
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
+            await this.delay(100); // Short reset pulse
             
-            await this.delay(300); // Hold reset longer for ESP32-S3
-            
-            // Step 2: Release reset while keeping GPIO0 low (enter bootloader)
-            console.log('📍 Step 2: Releasing reset, keeping bootloader mode...');
+            // Step 4: Release reset while keeping GPIO0 low
+            console.log('📍 Step 4: Releasing reset, keeping bootloader mode...');
             await port.setSignals({
                 dataTerminalReady: true,   // EN = HIGH (run)
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
+            await this.delay(50); // Brief moment for boot detection
             
-            await this.delay(200); // Hold bootloader mode longer for ESP32-S3
-            
-            // Step 3: Release GPIO0 - device should be in bootloader mode
-            console.log('📍 Step 3: Releasing GPIO0, device in bootloader mode...');
+            // Step 5: Release GPIO0 - device should now be in bootloader
+            console.log('📍 Step 5: Releasing GPIO0, device should enter bootloader...');
             await port.setSignals({
                 dataTerminalReady: true,   // EN = HIGH (run)
                 requestToSend: true        // GPIO0 = HIGH (release)
             });
             
-            await this.delay(500); // Let ESP32-S3 stabilize longer
+            await this.delay(300); // Let ESP32-S3 bootloader initialize
             
-            console.log('✅ Hardware reset completed - device should be in bootloader mode');
+            console.log('✅ ESP32-S3 hardware reset completed - device should be in bootloader mode');
             
         } catch (error) {
             console.log('⚠️ Hardware reset failed:', error.message);
