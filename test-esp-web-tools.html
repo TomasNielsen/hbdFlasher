@@ -131,12 +131,12 @@
                 {
                     chipFamily: "ESP32-S3",
                     parts: [
-                        // Skipping bootloader.bin at 0x0 for secure boot compatibility
-                        { path: "./firmware/v1.36.0.16433/partition_table/partition-table.bin", offset: 0xa000 },
-                        { path: "./firmware/v1.36.0.16433/hbd.bin", offset: 0x10000 },
-                        { path: "./firmware/v1.36.0.16433/ota_data_initial.bin", offset: 0x910000 },
-                        { path: "./firmware/v1.36.0.16433/phy_init_data.bin", offset: 0x912000 },
-                        { path: "./firmware/v1.36.0.16433/assets.bin", offset: 0x914000 }
+                        // Skipping bootloader.bin at 0x0 for secure boot compatibility  
+                        { path: "./firmware/v1.36.0.16433/partition_table/partition-table.bin", offset: 40960 },
+                        { path: "./firmware/v1.36.0.16433/hbd.bin", offset: 65536 },
+                        { path: "./firmware/v1.36.0.16433/ota_data_initial.bin", offset: 9502720 },
+                        { path: "./firmware/v1.36.0.16433/phy_init_data.bin", offset: 9506816 },
+                        { path: "./firmware/v1.36.0.16433/assets.bin", offset: 9515008 }
                     ]
                 }
             ]
