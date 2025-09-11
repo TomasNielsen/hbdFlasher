@@ -184,6 +184,10 @@ class ESP32Flasher {
             console.log('🔄 Performing initial device reset for clean state...');
             await this.performInitialReset();
             
+            // Give device extra time before bootloader entry attempt
+            console.log('⏳ Allowing device to fully stabilize before bootloader entry...');
+            await this.delay(1000);
+            
             // Now perform hardware reset to enter bootloader (--before default_reset)
             console.log('🔄 Performing hardware reset to enter bootloader...');
             await this.performHardwareReset();
@@ -313,7 +317,7 @@ class ESP32Flasher {
             
             // Wait for normal firmware to start and then stabilize
             console.log('📍 Step 2: Waiting for device to boot normally and stabilize...');
-            await this.delay(2000);
+            await this.delay(4000); // Increased from 2s to 4s for ESP32-S3 boot time
             
             console.log('✅ Initial reset completed - device should be in normal mode');
             
@@ -346,7 +350,7 @@ class ESP32Flasher {
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
             
-            await this.delay(200); // Hold reset longer for more reliable entry
+            await this.delay(300); // Hold reset longer for ESP32-S3
             
             // Step 2: Release reset while keeping GPIO0 low (enter bootloader)
             console.log('📍 Step 2: Releasing reset, keeping bootloader mode...');
@@ -355,7 +359,7 @@ class ESP32Flasher {
                 requestToSend: false       // GPIO0 = LOW (bootloader mode)
             });
             
-            await this.delay(100); // Hold bootloader mode longer
+            await this.delay(200); // Hold bootloader mode longer for ESP32-S3
             
             // Step 3: Release GPIO0 - device should be in bootloader mode
             console.log('📍 Step 3: Releasing GPIO0, device in bootloader mode...');
@@ -364,7 +368,7 @@ class ESP32Flasher {
                 requestToSend: true        // GPIO0 = HIGH (release)
             });
             
-            await this.delay(200); // Let device stabilize longer
+            await this.delay(500); // Let ESP32-S3 stabilize longer
             
             console.log('✅ Hardware reset completed - device should be in bootloader mode');
             
