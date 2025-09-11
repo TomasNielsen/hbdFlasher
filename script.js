@@ -790,6 +790,88 @@ class ESP32Flasher {
         }
     }
 
+    async verifyFlashReadback(address, originalData) {
+        console.log(`📖 Flash readback verification: address=0x${address.toString(16)}, size=${originalData.length}`);
+        
+        // For large files, verify multiple samples throughout the file
+        const sampleSize = Math.min(1024, originalData.length); // Read up to 1KB samples
+        const numSamples = Math.min(3, Math.ceil(originalData.length / 32768)); // Sample every 32KB, max 3 samples
+        
+        for (let i = 0; i < numSamples; i++) {
+            const sampleOffset = Math.floor((originalData.length / numSamples) * i);
+            const readAddress = address + sampleOffset;
+            const readSize = Math.min(sampleSize, originalData.length - sampleOffset);
+            
+            console.log(`📖 Reading sample ${i + 1}/${numSamples}: ${readSize} bytes from 0x${readAddress.toString(16)}`);
+            
+            try {
+                const readData = await this.esp32ReadFlash(readAddress, readSize);
+                
+                if (readData && readData.length >= readSize) {
+                    // Compare read data with original data
+                    const originalSample = originalData.slice(sampleOffset, sampleOffset + readSize);
+                    const readSample = readData.slice(0, readSize);
+                    
+                    // Check if data matches
+                    let matches = 0;
+                    let total = Math.min(originalSample.length, readSample.length);
+                    
+                    for (let j = 0; j < total; j++) {
+                        if (originalSample[j] === readSample[j]) {
+                            matches++;
+                        }
+                    }
+                    
+                    const matchPercent = (matches / total) * 100;
+                    console.log(`📊 Sample ${i + 1} match: ${matches}/${total} bytes (${matchPercent.toFixed(1)}%)`);
+                    
+                    if (matchPercent < 95) { // Allow 5% tolerance for flash quirks
+                        console.log(`❌ Sample ${i + 1} verification failed - only ${matchPercent.toFixed(1)}% match`);
+                        return false;
+                    }
+                } else {
+                    console.log(`❌ Sample ${i + 1} read failed - invalid data length`);
+                    return false;
+                }
+            } catch (error) {
+                console.log(`❌ Sample ${i + 1} read failed:`, error.message);
+                return false;
+            }
+        }
+        
+        console.log(`✅ All ${numSamples} samples verified successfully`);
+        return true;
+    }
+
+    async esp32ReadFlash(address, size) {
+        console.log(`📥 ESP32_READ_FLASH: address=0x${address.toString(16)}, size=${size}`);
+        
+        // ESP32 READ_REG command for flash memory access
+        // Command format: READ_REG(0x0A) with address parameter
+        const data = new Uint8Array(4);
+        const view = new DataView(data.buffer);
+        view.setUint32(0, address, true);
+        
+        const command = this.createCommand(0x0A, data);
+        
+        try {
+            await this.writer.write(command);
+            const response = await this.readResponse(5000);
+            
+            if (response && response.length >= 4) {
+                // Response format: 4 bytes of data + 2 bytes status
+                console.log(`📥 Read ${response.length} bytes from flash`);
+                return response;
+            } else {
+                console.log(`⚠️ Invalid read response length: ${response?.length || 0}`);
+                return null;
+            }
+        } catch (error) {
+            console.log(`⚠️ ESP32_READ_FLASH failed:`, error.message);
+            return null;
+        }
+    }
+
     async esp32FlashReadbackCheck(address, size, expectedMD5) {
         console.log(`📖 FLASH_READ verification: address=0x${address.toString(16)}, size=${size}`);
         
@@ -1009,20 +1091,22 @@ class ESP32Flasher {
             await this.esp32FlashEnd(false); // Never reboot during individual file flash
             console.log(`✅ File ${fileIndex + 1} flashed successfully`);
             
-            // Verify flash with basic connectivity check (MD5 check has compatibility issues)
-            console.log(`🔍 Verifying bootloader communication after file ${fileIndex + 1}...`);
+            // Verify flash with actual readback verification (detect silent write failures)
+            console.log(`🔍 Reading back flash data to verify file ${fileIndex + 1}...`);
             
             try {
-                // Use basic SYNC check to verify bootloader is still responsive after flash
-                const syncOk = await this.esp32QuickSync();
-                if (syncOk) {
-                    console.log(`✅ File ${fileIndex + 1} verification successful - bootloader responsive`);
+                // Read back a sample of the written data to verify it was actually written
+                const verificationOk = await this.verifyFlashReadback(file.address, file.data);
+                
+                if (verificationOk) {
+                    console.log(`✅ File ${fileIndex + 1} readback verification successful - data confirmed in flash`);
                 } else {
-                    console.log(`⚠️ File ${fileIndex + 1} verification warning - bootloader communication issues`);
+                    console.log(`❌ File ${fileIndex + 1} readback verification FAILED - data not in flash!`);
+                    throw new Error(`Flash readback verification failed for file ${fileIndex + 1} - silent write failure detected`);
                 }
             } catch (verifyError) {
-                console.log(`❌ Flash verification failed for file ${fileIndex + 1}:`, verifyError.message);
-                console.log(`⚠️ Continuing with caution - bootloader may be unresponsive`);
+                console.log(`❌ Flash readback verification failed for file ${fileIndex + 1}:`, verifyError.message);
+                throw new Error(`Flash verification failed: ${verifyError.message}`);
             }
             
             // Quick SYNC check before next file (unless it's the last file)
@@ -1058,11 +1142,16 @@ class ESP32Flasher {
                 console.log(`🔍 Final verification of critical file at 0x${file.address.toString(16)} (${file.data.length} bytes)`);
                 
                 try {
-                    // Use basic bootloader responsiveness as verification
-                    // MD5 check has compatibility issues with this ESP32 bootloader version
-                    await this.esp32QuickSync();
-                    console.log(`✅ Critical file at 0x${file.address.toString(16)} - bootloader responsive`);
-                    verificationsPassed++;
+                    // Use real flash readback verification for critical files
+                    const verificationOk = await this.verifyFlashReadback(file.address, file.data);
+                    
+                    if (verificationOk) {
+                        console.log(`✅ Critical file at 0x${file.address.toString(16)} - flash readback verified`);
+                        verificationsPassed++;
+                    } else {
+                        console.log(`❌ Critical file at 0x${file.address.toString(16)} - readback verification failed`);
+                        verificationsFailed++;
+                    }
                 } catch (error) {
                     console.log(`❌ Critical file verification failed at 0x${file.address.toString(16)}:`, error.message);
                     verificationsFailed++;
