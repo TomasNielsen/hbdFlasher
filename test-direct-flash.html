@@ -5,23 +5,32 @@
   <title>HBD ESP32-S3 Direct Flasher</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script type="module" src="https://unpkg.com/esp-web-tools@9.4.3/dist/web/install-button.js"></script>
+  <!-- Use ESP Web Tools install button without importing flash directly -->
+  <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
+  
+  <!-- Import dependencies manually with full URLs -->
+  <script type="importmap">
+    {
+      "imports": {
+        "esptool-js": "https://unpkg.com/esptool-js@0.4.6/lib/index.js"
+      }
+    }
+  </script>
+  
   <script type="module">
-    // Try loading ESP Web Tools with specific version that includes bundled dependencies
     try {
-      const { flash } = await import("https://unpkg.com/esp-web-tools@9.4.3/dist/flash.js");
+      // Import esptool-js first to resolve ESP Web Tools dependency
+      const esptool = await import("https://unpkg.com/esptool-js@0.4.6/lib/index.js");
+      console.log('esptool-js loaded:', esptool);
+      
+      // Now import ESP Web Tools flash function
+      const { flash } = await import("https://unpkg.com/esp-web-tools@9/dist/flash.js");
       window.espWebToolsFlash = flash;
       console.log('ESP Web Tools flash function loaded:', typeof flash);
     } catch (error) {
-      console.error('Failed to load ESP Web Tools:', error);
-      // Fallback to CDN that bundles all dependencies
-      try {
-        const { flash } = await import("https://cdn.jsdelivr.net/npm/esp-web-tools@9.4.3/dist/flash.js");
-        window.espWebToolsFlash = flash;
-        console.log('ESP Web Tools loaded from JSDelivr fallback');
-      } catch (fallbackError) {
-        console.error('All ESP Web Tools loading attempts failed:', fallbackError);
-      }
+      console.error('Module loading failed:', error);
+      // Fallback: just use the install button approach instead
+      console.log('Using install button fallback approach');
     }
   </script>
   <style>
