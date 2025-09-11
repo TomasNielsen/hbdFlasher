@@ -336,11 +336,16 @@ class ESP32Flasher {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Calculate timeout based on data size (matches esptool.py timeout_per_mb)
-    calculateTimeout(dataSizeBytes, baseTimeoutMs = 3000) {
-        const sizeInMB = dataSizeBytes / (1024 * 1024);
-        const sizeBasedTimeout = Math.max(sizeInMB * 1000, 1000); // 1s per MB, minimum 1s
-        return baseTimeoutMs + sizeBasedTimeout;
+    // Esptool.py timeout constants
+    getEsptoolTimeout(operation) {
+        const timeouts = {
+            'DEFAULT': 3000,        // 3 seconds
+            'SYNC': 100,           // 100ms (already correct)
+            'FLASH_BEGIN': 10000,  // 10 seconds for erase operations
+            'FLASH_DATA': 3000,    // 3 seconds for data operations
+            'FLASH_END': 3000      // 3 seconds for completion
+        };
+        return timeouts[operation] || timeouts['DEFAULT'];
     }
 
     // ESP32 Serial Protocol Implementation
@@ -387,33 +392,25 @@ class ESP32Flasher {
         
         const result = new Uint8Array(decoded);
         
-        // Parse ESP32 response format: direction(1), cmd(1), size(2), checksum(4), data(...)
+        // Parse ESP32 response format: direction(1), cmd(1), size(2), checksum(4), data(...), status_bytes(2)
         if (result.length >= 8) {
             const direction = result[0];
             const cmd = result[1];
             const size = result[2] | (result[3] << 8);
             const checksum = result[4] | (result[5] << 8) | (result[6] << 16) | (result[7] << 24);
             
-            console.log(`📋 Response: dir=0x${direction.toString(16)} cmd=0x${cmd.toString(16)} size=${size} checksum=0x${checksum.toString(16)}`);
-            
-            if (direction === 0x01) { // Response direction
-                if (size > 0 && result.length >= 8 + size) {
-                    const responseData = result.slice(8, 8 + size);
-                    console.log('📄 Response data:', Array.from(responseData).map(b => b.toString(16).padStart(2, '0')).join(' '));
-                    
-                    // Check for error responses
-                    if (size >= 4) {
-                        const status = responseData[0] | (responseData[1] << 8) | (responseData[2] << 16) | (responseData[3] << 24);
-                        if (status !== 0) {
-                            // Status 0x501 appears to be non-critical during FLASH_DATA - process continues
-                            if (status === 0x501) {
-                                console.log(`⚠️ ESP32 non-critical status: 0x${status.toString(16)} (continuing...)`);
-                            } else {
-                                console.log(`❌ ESP32 error response: status=0x${status.toString(16)}`);
-                            }
-                        }
-                    }
+            if (direction === 0x01 && result.length >= 8 + size + 2) { // Response direction + status bytes
+                const responseData = result.slice(8, 8 + size);
+                // Status bytes are the LAST 2 bytes (esptool.py format)
+                const statusByte1 = result[result.length - 2];
+                const statusByte2 = result[result.length - 1];
+                
+                // First status byte determines success (0) or failure (non-zero)
+                if (statusByte1 !== 0) {
+                    throw new Error(`ESP32 command failed with status: 0x${statusByte1.toString(16).padStart(2, '0')} 0x${statusByte2.toString(16).padStart(2, '0')}`);
                 }
+                
+                return result; // Success - return full response
             }
         }
         
@@ -502,7 +499,7 @@ class ESP32Flasher {
     }
 
     async readResponse(timeoutMs = 10000) {
-        console.log(`⏳ Waiting for response (timeout: ${timeoutMs}ms)...`);
+        // Silent operation like esptool.py - only log on timeout failure
         
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -522,7 +519,7 @@ class ESP32Flasher {
                         return;
                     }
                     
-                    console.log('📨 Received chunk:', Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                    // Chunk received - silent like esptool
                     chunks.push(value);
                     totalLength += value.length;
                     
@@ -538,7 +535,7 @@ class ESP32Flasher {
                             offset += chunk.length;
                         }
                         
-                        console.log('📨 Complete response:', Array.from(combined).map(b => b.toString(16).padStart(2, '0')).join(' '));
+                        // Complete response received - silent like esptool
                         resolve(this.slipDecode(combined));
                     } else {
                         // Continue reading more chunks
@@ -574,15 +571,10 @@ class ESP32Flasher {
         view.setUint32(8, packetSize, true);
         view.setUint32(12, offset, true);
         
-        console.log('📦 FLASH_BEGIN data:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
-        
         const command = this.createCommand(0x02, data);
-        console.log('📤 Sending FLASH_BEGIN command:', Array.from(command).map(b => b.toString(16).padStart(2, '0')).join(' '));
         await this.writer.write(command);
         
-        // Flash erase operations can take a long time - use size-based timeout
-        const timeout = this.calculateTimeout(size, 10000); // 10s base + size-based
-        const response = await this.readResponse(timeout);
+        const response = await this.readResponse(this.getEsptoolTimeout('FLASH_BEGIN'));
         console.log('✅ FLASH_BEGIN successful');
         return response;
     }
@@ -603,9 +595,9 @@ class ESP32Flasher {
         
         const command = this.createCommand(0x03, payload);
         
-        // Esptool-style retry logic: 3 attempts with size-based timeout
+        // Esptool-style retry logic: 3 attempts with standard timeout
         const WRITE_BLOCK_ATTEMPTS = 3;
-        const timeout = this.calculateTimeout(data.length);
+        const timeout = this.getEsptoolTimeout('FLASH_DATA');
         
         for (let attempt = 0; attempt < WRITE_BLOCK_ATTEMPTS; attempt++) {
             try {
@@ -617,7 +609,7 @@ class ESP32Flasher {
                 
                 if (attempt < WRITE_BLOCK_ATTEMPTS - 1) {
                     console.log(`🔄 Retrying FLASH_DATA seq=${sequence} (attempt ${attempt + 2}/${WRITE_BLOCK_ATTEMPTS})...`);
-                    await this.delay(100 * (attempt + 1)); // Exponential backoff
+                    await this.delay(100); // Fixed delay like esptool
                 } else {
                     throw new Error(`FLASH_DATA failed after ${WRITE_BLOCK_ATTEMPTS} attempts (seq=${sequence}): ${error.message}`);
                 }
@@ -637,7 +629,7 @@ class ESP32Flasher {
         
         // Esptool-style retry logic: 3 attempts for FLASH_END
         const FLASH_END_ATTEMPTS = 3;
-        const timeout = 10000; // 10s timeout for flash completion
+        const timeout = this.getEsptoolTimeout('FLASH_END');
         
         for (let attempt = 0; attempt < FLASH_END_ATTEMPTS; attempt++) {
             try {
@@ -650,7 +642,7 @@ class ESP32Flasher {
                 
                 if (attempt < FLASH_END_ATTEMPTS - 1) {
                     console.log(`🔄 Retrying FLASH_END (attempt ${attempt + 2}/${FLASH_END_ATTEMPTS})...`);
-                    await this.delay(200 * (attempt + 1)); // Progressive delay
+                    await this.delay(100); // Fixed delay like esptool
                 } else {
                     throw new Error(`FLASH_END failed after ${FLASH_END_ATTEMPTS} attempts: ${error.message}`);
                 }
@@ -709,14 +701,15 @@ class ESP32Flasher {
             for (let offset = 0; offset < file.data.length; offset += chunkSize) {
                 const chunk = file.data.slice(offset, offset + chunkSize);
                 
-                console.log(`📦 Sending chunk ${sequence + 1}: ${chunk.length} bytes`);
                 await this.esp32FlashData(chunk, sequence);
                 sequence++;
                 
-                // Report progress
+                // Report progress every 10% to reduce log spam
                 const fileProgress = ((offset + chunk.length) / file.data.length) * 100;
                 const totalProgress = ((fileIndex + (offset + chunk.length) / file.data.length) / firmwareData.length) * 100;
-                console.log(`📊 File progress: ${fileProgress.toFixed(1)}%, Total: ${totalProgress.toFixed(1)}%`);
+                if (sequence % 10 === 0 || offset + chunk.length >= file.data.length) {
+                    console.log(`📊 File progress: ${fileProgress.toFixed(0)}%, Total: ${totalProgress.toFixed(0)}%`);
+                }
             }
             
             // End flash for this file
