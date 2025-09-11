@@ -950,6 +950,7 @@ class ESP32Flasher {
             while (retryCount < maxRetries) {
                 try {
                     await this.esp32FlashBegin(file.data.length, file.address);
+                    console.log(`🧹 Flash region 0x${file.address.toString(16)} prepared for ${file.data.length} bytes`);
                     break; // Success, exit retry loop
                 } catch (error) {
                     retryCount++;
@@ -980,8 +981,8 @@ class ESP32Flasher {
                 }
             }
             
-            // Send data in 1KB chunks
-            const chunkSize = 1024;
+            // Send data in smaller chunks for better ESP32-S3 compatibility
+            const chunkSize = 512; // Reduced from 1024 to 512 bytes
             let sequence = 0;
             
             for (let offset = 0; offset < file.data.length; offset += chunkSize) {
@@ -989,6 +990,11 @@ class ESP32Flasher {
                 
                 await this.esp32FlashData(chunk, sequence);
                 sequence++;
+                
+                // Add small delay for ESP32-S3 flash write stability
+                if (sequence % 50 === 0) {  // Every 50 chunks (~25KB)
+                    await this.delay(10); // 10ms pause to let flash controller catch up
+                }
                 
                 // Report progress every 10% to reduce log spam
                 const fileProgress = ((offset + chunk.length) / file.data.length) * 100;
