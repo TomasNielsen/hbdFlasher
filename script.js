@@ -13,6 +13,14 @@ class ESP32Flasher {
         this.espLoader = null;
         this.transport = null;
         
+        // Hardcoded secure boot configuration (100% secure boot devices)
+        this.secureBootEnabled = true;
+        this.romOnlyMode = true;
+        this.flashTimeout = 10000; // Extended timeout for secure operations
+        this.forceFlashing = true; // Enable force flashing for protected regions
+        
+        console.log('🔐 Hardcoded secure boot configuration: ROM-only mode with enhanced timeouts');
+        
         // Firmware configurations matching manifest.json
         this.firmwareConfig = {
             'v1.36.0.16433': {
@@ -740,13 +748,8 @@ class ESP32Flasher {
             console.log(`⚠️ SYNC recovery failed, trying configuration restore...`);
         }
         
-        // Step 2: Re-detect secure boot status (may have been lost)
-        try {
-            await this.detectSecureBoot();
-            console.log(`✅ Secure boot configuration restored`);
-        } catch (configError) {
-            console.log(`⚠️ Configuration restore failed:`, configError.message);
-        }
+        // Step 2: Configuration is now hardcoded - no re-detection needed
+        console.log(`✅ Secure boot configuration is hardcoded - no restore needed`);
         
         // Step 3: Short stabilization delay
         await this.delay(1000);
@@ -761,7 +764,7 @@ class ESP32Flasher {
             // Test 1: Bootloader memory consistency
             console.log('📍 Test 1: Bootloader memory consistency check...');
             const memTest1 = await this.esp32ReadReg(0x60007000); // Base efuse register
-            const memTest2 = await this.esp32ReadReg(0x60007048); // Secure boot register
+            const memTest2 = await this.esp32ReadReg(0x60007048); // Efuse memory integrity test
             
             if (!memTest1 || !memTest2) {
                 console.log('❌ Memory consistency check failed - bootloader may be corrupted');
@@ -997,9 +1000,6 @@ class ESP32Flasher {
                     if (response) {
                         console.log('✅ ESP32 SYNC successful');
                         
-                        // Detect secure boot and configure ROM-only mode  
-                        await this.detectSecureBoot();
-                        
                         return true;
                     }
                 } catch (error) {
@@ -1027,36 +1027,6 @@ class ESP32Flasher {
         throw new Error('ESP32 SYNC failed after 35 attempts (5 cycles × 7 sync attempts)');
     }
 
-    async detectSecureBoot() {
-        console.log('🔐 Detecting secure boot status...');
-        
-        // Initialize secure boot configuration
-        this.secureBootEnabled = false;
-        this.romOnlyMode = true; // Always use ROM-only mode for compatibility
-        
-        try {
-            // Try to read secure boot status from efuse (EFUSE_SECURE_BOOT_EN_REG)
-            // ESP32-S3 efuse register for secure boot: 0x60007048
-            const secureBootReg = await this.esp32ReadReg(0x60007048);
-            
-            if (secureBootReg && secureBootReg.length >= 4) {
-                const secureBootValue = new DataView(secureBootReg.buffer).getUint32(0, true);
-                this.secureBootEnabled = (secureBootValue & 0x1) !== 0;
-                
-                if (this.secureBootEnabled) {
-                    console.log('🔐 Secure boot ENABLED - Using ROM-only mode and special handling');
-                } else {
-                    console.log('🔐 Secure boot DISABLED - Using ROM-only mode for compatibility');
-                }
-            }
-        } catch (error) {
-            console.log('⚠️ Could not read secure boot status, assuming enabled for safety');
-            this.secureBootEnabled = true; // Assume enabled for safety
-        }
-        
-        // Configure flash operations for secure boot compatibility
-        this.configureSecureBootMode();
-    }
 
     async esp32ReadReg(address) {
         console.log(`📥 Reading register 0x${address.toString(16)}`);
