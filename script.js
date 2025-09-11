@@ -336,6 +336,13 @@ class ESP32Flasher {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    // Calculate timeout based on data size (matches esptool.py timeout_per_mb)
+    calculateTimeout(dataSizeBytes, baseTimeoutMs = 3000) {
+        const sizeInMB = dataSizeBytes / (1024 * 1024);
+        const sizeBasedTimeout = Math.max(sizeInMB * 1000, 1000); // 1s per MB, minimum 1s
+        return baseTimeoutMs + sizeBasedTimeout;
+    }
+
     // ESP32 Serial Protocol Implementation
     slipEncode(data) {
         const encoded = [];
@@ -440,9 +447,9 @@ class ESP32Flasher {
     }
 
     async esp32Sync() {
-        console.log('📡 Sending ESP32 SYNC command...');
+        console.log('📡 Sending ESP32 SYNC command (esptool-style)...');
         
-        // SYNC command payload: 0x07 0x07 0x12 0x20 + 32 bytes of 0x55
+        // SYNC command payload: 0x07 0x07 0x12 0x20 + 32 bytes of 0x55 (matches esptool.py)
         const syncData = new Uint8Array(36);
         syncData[0] = 0x07;
         syncData[1] = 0x07;
@@ -454,25 +461,44 @@ class ESP32Flasher {
         
         const syncCommand = this.createCommand(0x08, syncData);
         
-        // Send sync command multiple times for reliability
-        for (let attempt = 0; attempt < 12; attempt++) {
-            console.log(`   SYNC attempt ${attempt + 1}...`);
-            await this.writer.write(syncCommand);
+        // Esptool-style SYNC: 7 sync attempts × 5 connection cycles = 35 total attempts
+        // Short timeout (100ms) with more attempts for faster connection
+        for (let connectionCycle = 0; connectionCycle < 5; connectionCycle++) {
+            console.log(`🔄 Connection cycle ${connectionCycle + 1}/5`);
             
-            try {
-                const response = await this.readResponse(5000); // 5 second timeout for faster feedback
-                if (response) {
-                    console.log('✅ ESP32 SYNC successful');
-                    return true;
+            for (let syncAttempt = 0; syncAttempt < 7; syncAttempt++) {
+                console.log(`   SYNC ${syncAttempt + 1}/7`);
+                await this.writer.write(syncCommand);
+                
+                try {
+                    const response = await this.readResponse(100); // 100ms timeout (matches esptool)
+                    if (response) {
+                        console.log('✅ ESP32 SYNC successful');
+                        return true;
+                    }
+                } catch (error) {
+                    // Fast timeout is expected, continue to next attempt
                 }
-            } catch (error) {
-                console.log(`   SYNC attempt ${attempt + 1} failed:`, error.message);
+                
+                await this.delay(50); // Short delay between sync attempts
             }
             
-            await this.delay(100);
+            // Longer delay between connection cycles
+            if (connectionCycle < 4) {
+                console.log('   Connection cycle failed, trying device reset...');
+                await this.delay(500);
+                
+                // Try hardware reset between cycles for better reliability
+                try {
+                    await this.performHardwareReset();
+                    await this.delay(200);
+                } catch (error) {
+                    console.log('   Hardware reset failed, continuing...');
+                }
+            }
         }
         
-        throw new Error('ESP32 SYNC failed after 12 attempts');
+        throw new Error('ESP32 SYNC failed after 35 attempts (5 cycles × 7 sync attempts)');
     }
 
     async readResponse(timeoutMs = 10000) {
@@ -554,8 +580,9 @@ class ESP32Flasher {
         console.log('📤 Sending FLASH_BEGIN command:', Array.from(command).map(b => b.toString(16).padStart(2, '0')).join(' '));
         await this.writer.write(command);
         
-        // Flash erase operations can take a long time - use 30 second timeout
-        const response = await this.readResponse(30000);
+        // Flash erase operations can take a long time - use size-based timeout
+        const timeout = this.calculateTimeout(size, 10000); // 10s base + size-based
+        const response = await this.readResponse(timeout);
         console.log('✅ FLASH_BEGIN successful');
         return response;
     }
@@ -575,10 +602,27 @@ class ESP32Flasher {
         payload.set(data, header.length);
         
         const command = this.createCommand(0x03, payload);
-        await this.writer.write(command);
         
-        const response = await this.readResponse(30000);
-        return response;
+        // Esptool-style retry logic: 3 attempts with size-based timeout
+        const WRITE_BLOCK_ATTEMPTS = 3;
+        const timeout = this.calculateTimeout(data.length);
+        
+        for (let attempt = 0; attempt < WRITE_BLOCK_ATTEMPTS; attempt++) {
+            try {
+                await this.writer.write(command);
+                const response = await this.readResponse(timeout);
+                return response;
+            } catch (error) {
+                console.log(`⚠️ FLASH_DATA attempt ${attempt + 1} failed (seq=${sequence}):`, error.message);
+                
+                if (attempt < WRITE_BLOCK_ATTEMPTS - 1) {
+                    console.log(`🔄 Retrying FLASH_DATA seq=${sequence} (attempt ${attempt + 2}/${WRITE_BLOCK_ATTEMPTS})...`);
+                    await this.delay(100 * (attempt + 1)); // Exponential backoff
+                } else {
+                    throw new Error(`FLASH_DATA failed after ${WRITE_BLOCK_ATTEMPTS} attempts (seq=${sequence}): ${error.message}`);
+                }
+            }
+        }
     }
 
     async esp32FlashEnd(reboot = true) {
@@ -590,11 +634,28 @@ class ESP32Flasher {
         view.setUint32(0, reboot ? 0 : 1, true);
         
         const command = this.createCommand(0x04, data);
-        await this.writer.write(command);
         
-        const response = await this.readResponse(30000);
-        console.log('✅ FLASH_END successful');
-        return response;
+        // Esptool-style retry logic: 3 attempts for FLASH_END
+        const FLASH_END_ATTEMPTS = 3;
+        const timeout = 10000; // 10s timeout for flash completion
+        
+        for (let attempt = 0; attempt < FLASH_END_ATTEMPTS; attempt++) {
+            try {
+                await this.writer.write(command);
+                const response = await this.readResponse(timeout);
+                console.log('✅ FLASH_END successful');
+                return response;
+            } catch (error) {
+                console.log(`⚠️ FLASH_END attempt ${attempt + 1} failed:`, error.message);
+                
+                if (attempt < FLASH_END_ATTEMPTS - 1) {
+                    console.log(`🔄 Retrying FLASH_END (attempt ${attempt + 2}/${FLASH_END_ATTEMPTS})...`);
+                    await this.delay(200 * (attempt + 1)); // Progressive delay
+                } else {
+                    throw new Error(`FLASH_END failed after ${FLASH_END_ATTEMPTS} attempts: ${error.message}`);
+                }
+            }
+        }
     }
 
     async esp32FlashFirmware(firmwareData) {
