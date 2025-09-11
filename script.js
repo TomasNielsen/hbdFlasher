@@ -210,10 +210,6 @@ class ESP32Flasher {
             
             await this.esp32FlashFirmware(firmwareData);
             
-            // Hard reset after flashing (matches --after hard_reset)
-            console.log('🔄 Performing hard reset...');
-            await this.esp32HardReset();
-            
             console.log('✅ Firmware flashing completed successfully!');
             
             // Show success
@@ -336,15 +332,21 @@ class ESP32Flasher {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Esptool.py timeout constants
-    getEsptoolTimeout(operation) {
+    // Esptool.py timeout constants with dynamic erase timeout calculation
+    getEsptoolTimeout(operation, eraseBlocks = 1) {
         const timeouts = {
             'DEFAULT': 3000,        // 3 seconds
-            'SYNC': 100,           // 100ms (already correct)
-            'FLASH_BEGIN': 10000,  // 10 seconds for erase operations
+            'SYNC': 100,           // 100ms (already correct)  
             'FLASH_DATA': 3000,    // 3 seconds for data operations
             'FLASH_END': 3000      // 3 seconds for completion
         };
+        
+        // Dynamic timeout for FLASH_BEGIN based on erase blocks (like esptool.py)
+        if (operation === 'FLASH_BEGIN') {
+            // Base 10s + 2s per block (large files need more time to erase)
+            return Math.max(10000, 10000 + (eraseBlocks * 2000));
+        }
+        
         return timeouts[operation] || timeouts['DEFAULT'];
     }
 
@@ -441,6 +443,30 @@ class ESP32Flasher {
         }
         
         return this.slipEncode(packet);
+    }
+
+    // Lightweight SYNC check for inter-file communication
+    async esp32QuickSync() {
+        // Single quick SYNC attempt for inter-file transitions
+        const syncData = new Uint8Array(36);
+        syncData[0] = 0x07;
+        syncData[1] = 0x07;
+        syncData[2] = 0x12;
+        syncData[3] = 0x20;
+        for (let i = 4; i < 36; i++) {
+            syncData[i] = 0x55;
+        }
+        
+        const syncCommand = this.createCommand(0x08, syncData);
+        
+        // Just one quick attempt with short timeout
+        await this.writer.write(syncCommand);
+        try {
+            const response = await this.readResponse(200); // 200ms timeout
+            return true; // Success
+        } catch (error) {
+            return false; // Failed - need recovery
+        }
     }
 
     async esp32Sync() {
@@ -574,7 +600,9 @@ class ESP32Flasher {
         const command = this.createCommand(0x02, data);
         await this.writer.write(command);
         
-        const response = await this.readResponse(this.getEsptoolTimeout('FLASH_BEGIN'));
+        // Calculate blocks for dynamic timeout (from erase_size calculation above)
+        const blocks = Math.ceil(size / 65536);
+        const response = await this.readResponse(this.getEsptoolTimeout('FLASH_BEGIN', blocks));
         console.log('✅ FLASH_BEGIN successful');
         return response;
     }
@@ -712,14 +740,17 @@ class ESP32Flasher {
                 }
             }
             
-            // End flash for this file
-            await this.esp32FlashEnd(false); // Don't reboot until all files are done
+            // End flash for this file - reboot only on the last file
+            const isLastFile = fileIndex === firmwareData.length - 1;
+            await this.esp32FlashEnd(isLastFile); // Reboot on last file only
             console.log(`✅ File ${fileIndex + 1} flashed successfully`);
             
-            // Add delay between files to prevent device reset issues
-            if (fileIndex < firmwareData.length - 1) {
-                console.log('⏳ Waiting 3 seconds before next file...');
-                await this.delay(3000);
+            // Quick SYNC check before next file (unless it's the last file)
+            if (!isLastFile) {
+                const quickSyncOk = await this.esp32QuickSync();
+                if (!quickSyncOk) {
+                    console.log('⚠️ Quick SYNC failed, bootloader may need recovery for next file');
+                }
             }
         }
         
