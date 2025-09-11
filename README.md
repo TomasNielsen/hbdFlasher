@@ -88,6 +88,18 @@ For production use, deploy to any HTTPS-enabled hosting service:
 - Safari and Firefox don't support WebSerial API
 - Ensure you're accessing via HTTPS
 
+**Secure Boot Device Issues?**
+- ⚠️ **Web flasher cannot update secure boot devices** due to hardware security restrictions
+- Use desktop tools instead: [esptool.py](https://github.com/espressif/esptool) or your C# flasher
+- For network-capable devices, try OTA updates through the device's web interface
+- See [SECURE_BOOT_LIMITATIONS.md](SECURE_BOOT_LIMITATIONS.md) for detailed technical explanation
+
+## Device Compatibility
+
+✅ **Fully Supported**: Development boards, non-secure boot ESP32-S3 devices  
+⚠️ **Limited Support**: Secure boot enabled devices (use desktop tools instead)  
+❌ **Not Supported**: ESP32 (original), ESP32-C3, other chip families
+
 ## Support
 
-This tool flashes official HBD firmware for ESP32-S3 devices. For hardware or firmware issues, contact your device supplier.
+This tool flashes official HBD firmware for ESP32-S3 devices. For secure boot devices or hardware issues, use desktop flashing tools or contact your device supplier.
