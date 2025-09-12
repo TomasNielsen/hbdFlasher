@@ -90,6 +90,16 @@
             background: #dc3545;
         }
 
+        .status-indicator.disconnected {
+            background: #ffc107;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .controls {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -324,6 +334,45 @@
         window.addEventListener('DOMContentLoaded', async () => {
             await autoConnectHBD();
         });
+
+        // Listen for device connect/disconnect events
+        if ('serial' in navigator) {
+            navigator.serial.addEventListener('connect', (event) => {
+                const port = event.target;
+                const info = port.getInfo();
+                log('🔌 Device connected: VID=' + info.usbVendorId?.toString(16) + ' PID=' + info.usbProductId?.toString(16));
+                
+                // Auto-connect if it's an ESP32-S3 and we're not already connected
+                if (info.usbVendorId === 0x303a && !isConnected) {
+                    log('✨ ESP32-S3 detected, attempting auto-connection...');
+                    setTimeout(() => connectToPort(port), 1000);
+                }
+            });
+
+            navigator.serial.addEventListener('disconnect', (event) => {
+                const port = event.target;
+                const info = port.getInfo();
+                log('🔌 Device disconnected: VID=' + info.usbVendorId?.toString(16) + ' PID=' + info.usbProductId?.toString(16));
+                
+                // If this was our connected port, clean up
+                if (port === serialPort) {
+                    log('📱 Our HBD device was disconnected');
+                    isConnected = false;
+                    updateStatus('disconnected', 'Device disconnected - please reconnect');
+                    updateConnectButton(false, 'Connect Device');
+                    enableControls(false);
+                    
+                    // Clean up resources
+                    if (reader) {
+                        reader = null;
+                    }
+                    if (writer) {
+                        writer = null;
+                    }
+                    serialPort = null;
+                }
+            });
+        }
 
         // Auto-connect function
         async function autoConnectHBD() {
